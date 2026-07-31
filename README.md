@@ -94,3 +94,7 @@ docs/VALIDATION.md          measured numbers + methodology
 
 MIT (Ventus Works) for this repo's code; upstream work under its own licenses
 — see [CREDITS.md](CREDITS.md). Model weights under DeepSeek's license.
+
+---
+
+Maintained by [Ventus Software Solutions](https://ventus.works)
