@@ -1,6 +1,6 @@
 services:
   vllm-dspark:
-    image: ${DSPARK_VLLM_IMAGE:-ventus/dspark-vllm:0731-0.1.0}
+    image: ${DSPARK_VLLM_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}
     network_mode: host
     ipc: host
     shm_size: "64gb"

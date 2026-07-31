@@ -6,7 +6,7 @@ compatible APIs. No .env editing, no kernel patches, no build on your side.**
 
 ```bash
 # on both nodes: get the image (or build it — see below)
-docker pull ventus/dspark-vllm:0731-0.1.0
+docker pull ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0
 
 # on the head node:
 ./ventus-dspark up --worker 10.10.10.2 --model ~/models/v4-flash-0731

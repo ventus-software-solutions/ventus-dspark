@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BASE_IMAGE="${VENTUS_BASE_IMAGE:-ghcr.io/bjk110/vllm-spark:unholy-fusion-prod-ready}"
-TAG="${VENTUS_TAG:-ventus/dspark-vllm:0731-0.1.0}"
+TAG="${VENTUS_TAG:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}"
 OVERLAY=ventus/dspark-vllm:overlay
 A=ventus/dspark-vllm:nvfp4-a
 B=ventus/dspark-vllm:nvfp4-b

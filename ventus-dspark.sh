@@ -21,7 +21,7 @@ ENV_DIR="$SCRIPT_DIR/.ventus"
 ENV_FILE="$ENV_DIR/env.dspark"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
-IMAGE="${VENTUS_IMAGE:-ventus/dspark-vllm:0731-0.1.0}"
+IMAGE="${VENTUS_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}"
 VLLM_PORT=8000
 MASTER_PORT=25000
 WORKER_USER="${VENTUS_WORKER_USER:-$USER}"
