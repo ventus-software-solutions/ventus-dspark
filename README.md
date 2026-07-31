@@ -72,16 +72,6 @@ vLLM `0.21.1rc1.dev339`, overlay + Patch 4 vendored under `docker/` (MIT,
 see [CREDITS.md](CREDITS.md)). The final image verifies itself with
 `import vllm` before reporting success.
 
-## How safe is it?
-
-Honest answer: the *overlay and launcher* are fully auditable — our code plus
-MIT-licensed patches, no hidden binaries. The *base image* is a community
-build from the same lineage as MiaAI-Lab/Anemll/r0b0tlab (see CREDITS); we pin
-it by tag today and will move to digest pins + cosign signatures + SBOM in CI
-as the next step. The runtime runs offline (`HF_HUB_OFFLINE=1`) and binds only
-local ports. We did not write any kernel code — see
-[docs/VALIDATION.md](docs/VALIDATION.md) for what is and isn't proven.
-
 ## Layout
 
 ```
