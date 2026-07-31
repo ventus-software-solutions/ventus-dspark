@@ -1,7 +1,7 @@
 # Validation — measured on the Ventus 2× DGX Spark fleet
 
-Date: 2026-07-31 evening. Hardware: 2× ASUS Ascent GX10 (DGX Spark, GB10,
-SM121, 128 GB unified), TP=2 over a 200 Gb ConnectX RoCE v2 link.
+Date: 2026-07-31 evening. Hardware: 2× DGX Spark (GB10, SM121, 128 GB
+unified), TP=2 over a 200 Gb ConnectX RoCE v2 link.
 Runtime: the exact image chain this repo builds (base `ghcr.io/bjk110/
 vllm-spark:unholy-fusion-prod-ready` → overlay → nvfp4 stages), engine
 vLLM `0.21.1rc1.dev339+g1967a5627bc3`.

@@ -61,7 +61,7 @@ probe_ib() {
   # Pick the IB device+port whose RoCEv2 GID is usable. A link-local (fe80)
   # GID at the selected index or an all-zeros one means no RoCEv2 on that
   # port. The working IPv4-mapped GID looks like
-  # 0000:0000:0000:0000:0000:ffff:0a0a:0a01 — leading zeros are normal.
+  # 0000:0000:0000:0000:0000:ffff:c0a8:0102 — leading zeros are normal.
   local host="$1" out dev port idx gid
   if [ "$host" = "local" ]; then
     out="$(for d in /sys/class/infiniband/*/; do

@@ -9,7 +9,7 @@ compatible APIs. No .env editing, no kernel patches, no build on your side.**
 docker pull ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0
 
 # on the head node:
-./ventus-dspark up --worker 10.10.10.2 --model ~/models/v4-flash-0731
+./ventus-dspark up --worker 192.168.1.2 --model ~/models/v4-flash-0731
 ```
 
 That's it. The launcher probes the IB fabric, validates the drafter geometry
@@ -19,7 +19,7 @@ worker first, waits for health, and prints your endpoint:
 ```
 [ventus-dspark] IB: rocep1s0f1 gid=3 eth=enp1s0f1np1
 [ventus-dspark] dspark k=5 context=1048576 (from checkpoint config)
-[ventus-dspark] serving: http://gx10-1:8000 — model /models/v4-flash-0731
+[ventus-dspark] serving: http://head-node:8000 — model /models/v4-flash-0731
 ```
 
 ## Requirements

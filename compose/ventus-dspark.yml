@@ -16,7 +16,7 @@ services:
 
     volumes:
       - ${HF_CACHE:-${HOME}/.cache/huggingface}:/cache/huggingface
-      # gx10-fleet: local weight tree (0731) mounted read-only for serving.
+      # local weight tree (0731) mounted read-only for serving.
       - ${MODELS_DIR:-${HOME}/models}:/models:ro
       # DSpark source patches are baked into the image from recipe/overlay/
       # (see README "vLLM version note"); do not bind-mount a proposer copy
