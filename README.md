@@ -75,7 +75,7 @@ see [CREDITS.md](CREDITS.md)). The final image verifies itself with
 ## Layout
 
 ```
-ventus-dspark.sh            the one command (up/down, --dry-run)
+ventus-dspark               the one command (up/down, --dry-run)
 compose/ventus-dspark.yml   compose service (worker/head roles)
 scripts/build.sh            reproducible image build
 docker/                     vendored overlay + stage Dockerfiles (MIT)

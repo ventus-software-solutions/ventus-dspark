@@ -1,5 +1,6 @@
 # All deploy-critical text ships to Linux nodes — keep it LF everywhere.
 *.sh        text eol=lf
+ventus-dspark text eol=lf
 *.env       text eol=lf
 *.yml       text eol=lf
 Dockerfile* text eol=lf
