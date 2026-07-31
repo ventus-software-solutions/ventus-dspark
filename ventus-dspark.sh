@@ -59,7 +59,9 @@ run_worker() { ssh "${SSH_OPTS[@]}" "${WORKER_USER}@$WORKER" "$@"; }
 
 probe_ib() {
   # Pick the IB device+port whose RoCEv2 GID is usable. A link-local (fe80)
-  # GID at the selected index or an empty one means no RoCEv2 on that port.
+  # GID at the selected index or an all-zeros one means no RoCEv2 on that
+  # port. The working IPv4-mapped GID looks like
+  # 0000:0000:0000:0000:0000:ffff:0a0a:0a01 — leading zeros are normal.
   local host="$1" out dev port idx gid
   if [ "$host" = "local" ]; then
     out="$(for d in /sys/class/infiniband/*/; do
@@ -68,16 +70,17 @@ probe_ib() {
         port="$(basename "$p")"
         for idx in 3 2 1; do
           [ -r "$p"gids/$idx ] || continue
-          gid="$(tr -d ':\n' < "$p"gids/$idx 2>/dev/null || true)"
+          IFS= read -r gid < "$p"gids/$idx || true
           case "$gid" in
-            ""|0000*|fe80*) continue ;;
+            ""|fe80:*) continue ;;
+            0000:0000:0000:0000:0000:0000:0000:0000) continue ;;
             *) echo "$dev:$port:$idx" ;;
           esac
         done
       done
     done | head -1)"
   else
-    out="$(run_worker 'for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 3 2 1; do [ -r "$p"gids/$idx ] || continue; gid=$(tr -d ":\n" < "$p"gids/$idx 2>/dev/null || true); case "$gid" in ""|0000*|fe80*) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1')"
+    out="$(run_worker 'for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 3 2 1; do [ -r "$p"gids/$idx ] || continue; IFS= read -r gid < "$p"gids/$idx || true; case "$gid" in ""|fe80:*) continue ;; 0000:0000:0000:0000:0000:0000:0000:0000) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1')"
   fi
   [ -n "$out" ] || fatal "no usable RoCEv2 GID found on $host — check the IB fabric"
   echo "$out"
