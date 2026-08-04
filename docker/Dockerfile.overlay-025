@@ -1,0 +1,13 @@
+# 0.25 engine lane: Anemll's GB10 port of vLLM 0.25.1 with DSpark, NVFP4
+# DS-MLA and b12x MoE already baked in. Unlike the 0.21 lane, no Stage-C
+# overlay is copied — a proposer from one vLLM version crashes another. The
+# only thing we add is the /v1/messages thinking translation (the system-role
+# fix is upstream in 0.25).
+FROM ghcr.io/anemll/dspark-vllm-gx10:0.1.1
+
+COPY overlay-025/vllm/entrypoints/anthropic/protocol.py \
+  /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/anthropic/protocol.py
+
+RUN python3 -m py_compile \
+  /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/anthropic/protocol.py \
+  && python3 -c "import vllm; print('vllm', vllm.__version__)"

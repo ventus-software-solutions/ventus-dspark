@@ -1,6 +1,6 @@
 services:
   vllm-dspark:
-    image: ${DSPARK_VLLM_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}
+    image: ${DSPARK_VLLM_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0}
     network_mode: host
     ipc: host
     shm_size: "64gb"
@@ -16,57 +16,31 @@ services:
 
     volumes:
       - ${HF_CACHE:-${HOME}/.cache/huggingface}:/cache/huggingface
-      # local weight tree (0731) mounted read-only for serving.
       - ${MODELS_DIR:-${HOME}/models}:/models:ro
-      # DSpark source patches are baked into the image from recipe/overlay/
-      # (see README "vLLM version note"); do not bind-mount a proposer copy
-      # here — a copy from one vLLM version crashes another.
 
+    # Only envs the Anemll 0.25 runtime actually registers. The 0.21 lane's
+    # VLLM_DSPARK_* / VLLM_DSV4_* kill-switches do not exist here — setting
+    # them just prints "Unknown vLLM environment variable" and does nothing.
     environment:
       HF_HOME: /cache/huggingface
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
       TRANSFORMERS_OFFLINE: "${TRANSFORMERS_OFFLINE:-0}"
       HF_HUB_DISABLE_XET: "${HF_HUB_DISABLE_XET:-1}"
       VLLM_CACHE_ROOT: /cache/huggingface/vllm-cache
-      # Long-context crash fix kill-switch (see docs/LONG_CONTEXT_CRASH_FIX.md).
-      # 1 (default) = clamp stale DSpark draft-KV slot ids; 0 = detect+log only.
-      DSPARK_SLOT_CLAMP: "${DSPARK_SLOT_CLAMP:-1}"
       VLLM_HOST_IP: "${VLLM_HOST_IP:-}"
 
       VLLM_ALLOW_LONG_MAX_MODEL_LEN: "${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}"
-      VLLM_TRITON_MLA_SPARSE: "${VLLM_TRITON_MLA_SPARSE:-1}"
       VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-256}"
       VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
-      VLLM_SKIP_INIT_MEMORY_CHECK: "${VLLM_SKIP_INIT_MEMORY_CHECK:-1}"
-
-      # FlashInfer sampler is part of the 2026-07-03 DSpark garble fix.
       VLLM_USE_FLASHINFER_SAMPLER: "${VLLM_USE_FLASHINFER_SAMPLER:-1}"
-
       VLLM_USE_B12X_MOE: "${VLLM_USE_B12X_MOE:-1}"
-      VLLM_USE_B12X_WO_PROJECTION: "${VLLM_USE_B12X_WO_PROJECTION:-1}"
+      # The Anemll runtime auto-enables the slower breakable CUDA-graph path
+      # when this is unset; regular graphs measured ~+29% single-stream.
+      VLLM_USE_BREAKABLE_CUDAGRAPH: "${VLLM_USE_BREAKABLE_CUDAGRAPH:-0}"
       VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM: "${VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM:-0}"
       VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M: "${VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M:-16}"
-      VLLM_B12X_W4A16_FORCE_TILE_CONFIG: "${VLLM_B12X_W4A16_FORCE_TILE_CONFIG:-}"
-      B12X_W4A16_TC_DECODE: "${B12X_W4A16_TC_DECODE:-0}"
 
-      VLLM_DSPARK_CONFIDENCE_THRESHOLD: "${VLLM_DSPARK_CONFIDENCE_THRESHOLD:-0.0}"
-      VLLM_DSPARK_CONFIDENCE_SCHEDULER: "${VLLM_DSPARK_CONFIDENCE_SCHEDULER:-off}"
-      VLLM_DSPARK_LOCAL_ARGMAX: "${VLLM_DSPARK_LOCAL_ARGMAX:-1}"
-      VLLM_DSPARK_REPLICATE_MARKOV_W1: "${VLLM_DSPARK_REPLICATE_MARKOV_W1:-1}"
-      VLLM_DSPARK_FUSED_MARKOV_ARGMAX: "${VLLM_DSPARK_FUSED_MARKOV_ARGMAX:-0}"
-      VLLM_DSPARK_GPU_REJECTED_CONTEXT_MASK: "${VLLM_DSPARK_GPU_REJECTED_CONTEXT_MASK:-1}"
-      VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT: "${VLLM_DSPARK_REFERENCE_KV_QUANT_DEQUANT:-0}"
-      VLLM_DSPARK_HARDWARE_SCHEDULER_EARLY_STOP: "${VLLM_DSPARK_HARDWARE_SCHEDULER_EARLY_STOP:-1}"
-      VLLM_DSV4_B12X_COMPRESSED_MLA: "${VLLM_DSV4_B12X_COMPRESSED_MLA:-0}"
-      VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE: "${VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE:-0}"
-      VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE_EXACT: "${VLLM_DSV4_DSPARK_DEFER_TARGET_CAPTURE_EXACT:-0}"
-
-      TORCH_CUDA_ARCH_LIST: "${TORCH_CUDA_ARCH_LIST:-12.1a}"
-      FLASHINFER_CUDA_ARCH_LIST: "${FLASHINFER_CUDA_ARCH_LIST:-12.1a}"
       FLASHINFER_DISABLE_VERSION_CHECK: "${FLASHINFER_DISABLE_VERSION_CHECK:-1}"
-      TILELANG_CLEANUP_TEMP_FILES: "${TILELANG_CLEANUP_TEMP_FILES:-1}"
-      DG_JIT_USE_NVRTC: "${DG_JIT_USE_NVRTC:-0}"
-      DG_JIT_NVCC_COMPILER: "${DG_JIT_NVCC_COMPILER:-/opt/env/bin/nvcc}"
       PYTORCH_CUDA_ALLOC_CONF: "${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
       NCCL_NET: "${NCCL_NET:-IB}"
@@ -86,20 +60,21 @@ services:
       MASTER_PORT: "${MASTER_PORT:-25000}"
       MTP_NUM_TOKENS: "${MTP_NUM_TOKENS:-5}"
 
+    entrypoint: []
     command:
       - bash
       - -lc
       - >
-        export PATH="/opt/env/bin:/opt/env/nvvm/bin:/opt/env/targets/sbsa-linux/nvvm/bin:$${PATH:-}";
-        export CUDA_HOME="$${CUDA_HOME:-/opt/env/targets/sbsa-linux}";
+        export PATH="/usr/local/cuda/bin:$${PATH:-}";
+        export CUDA_HOME="$${CUDA_HOME:-/usr/local/cuda}";
         export CUDA_PATH="$${CUDA_PATH:-$${CUDA_HOME}}";
         export CUDAToolkit_ROOT="$${CUDAToolkit_ROOT:-$${CUDA_HOME}}";
-        export LD_LIBRARY_PATH="/opt/env/lib:/opt/env/targets/sbsa-linux/lib:$${LD_LIBRARY_PATH:-}";
+        export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$${LD_LIBRARY_PATH:-}";
         SPECULATIVE_CONFIG="{\"method\":\"dspark\",\"num_speculative_tokens\":${MTP_NUM_TOKENS:-5},\"draft_sample_method\":\"probabilistic\"}";
         THINKING="${DEFAULT_THINKING:-off}";
         if [ "$${THINKING}" = "off" ]; then CHAT_KWARGS='{"thinking":false}';
         else CHAT_KWARGS="{\"thinking\":true,\"reasoning_effort\":\"$${THINKING}\"}"; fi;
-        exec /opt/env/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
+        exec /usr/local/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}
         --host ${VLLM_HOST:-127.0.0.1}
         --port ${VLLM_PORT:-8888}
@@ -113,6 +88,7 @@ services:
         --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-8192}
         --max-cudagraph-capture-size $$(( ${MAX_NUM_SEQS:-6} * (${MTP_NUM_TOKENS:-5} + 1) ))
         --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.80}
+        --moe-backend flashinfer_b12x
         --enable-prefix-caching
         --async-scheduling
         --enable-chunked-prefill

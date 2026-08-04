@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest pydantic pyyaml
+
+      - name: Overlay unit tests
+        run: python -m pytest tests/ -q
+
+      - name: Shell syntax
+        run: |
+          bash -n ventus-dspark
+          bash -n scripts/build.sh
+          bash -n scripts/fetch-weights.sh
+
+      - name: Benchmark script syntax
+        run: python -m py_compile scripts/benchmark.py
+
+      - name: Compose parses
+        run: python -c "import yaml; yaml.safe_load(open('compose/ventus-dspark.yml'))"

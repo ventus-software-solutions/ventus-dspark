@@ -40,6 +40,30 @@ Upstream reference (tonyd2wild, same hardware/profile): 32.7 → **55.4 tok/s
 mean** and acceptance 25.7% → **60.2%** with Patch 4; peak-finder prompt
 78.4 tok/s at 98.9% acceptance. Our 56.9/78.6 matches within run variance.
 
+## Engine A/B — 0.21 lane vs 0.25 lane (2026-08-04)
+
+Same hardware, same weights, same profile (gmu 0.80 on 0.25), full 20-cell
+compat sweep (`scripts/benchmark.py --profile compat`: prompts 256→131K,
+concurrency 1–6, temperature 0.6, single trial). Raw JSON:
+`results/compat.json` (0.21) and `results/compat-025.json` (0.25).
+
+| metric | 0.21 lane | 0.25 lane |
+|---|---|---|
+| decode, mean delta across 20 cells | baseline | **+8.4%** |
+| single-stream range | 57–70 tok/s | 72–81 tok/s |
+| KV pool @ 1M ctx | 1,468,303 tokens | 1,691,551 (+15%) |
+| draft acceptance | lower in 16/20 cells | higher (drafter improvement) |
+| warm boot | ~7 min | ~5 min |
+
+Caveats: compat profile is single-trial at temperature 0.6, so per-cell
+deltas carry acceptance variance — the +30% best cell drew 0.878 acceptance.
+Acceptance-corrected engine gain is ~+6–9% single-stream; the rest of the
+improvement is 0.25's drafter accepting more, which is real but
+workload-dependent. Decode speed on any engine tracks draft acceptance
+almost linearly (~`20 + 65·α` tok/s on 0.21): free prose ≈ 0.33 → ~38 tok/s,
+code ≈ 0.56 → ~56 tok/s, repetitive text ≈ 0.74+ → 70+. Quote workload
+numbers, not peak numbers.
+
 ## What was tested vs not
 
 Tested: dark-window smoke suite (above), full systemd reboot path (cold boot,

@@ -1,1 +1,6 @@
 .ventus/
+
+# Python bytecode from running tests/ or scripts/benchmark.py locally
+__pycache__/
+*.py[cod]
+.pytest_cache/

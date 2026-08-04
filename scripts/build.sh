@@ -3,10 +3,19 @@
 # Pure Python overlay — no compiled code of our own (see docker/ for the
 # exact chain). Run on each DGX Spark node, or in CI on an ARM64 runner.
 #
-#   ./scripts/build.sh                 # tags ventus/dspark-vllm:0731-0.1.0
+#   ./scripts/build.sh                 # 0.21 lane, tags ventus/dspark-vllm:0731-0.1.0
+#   ./scripts/build.sh 025             # 0.25 lane (Anemll base + protocol overlay)
 #   VENTUS_TAG=ventus/dspark-vllm:dev ./scripts/build.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+if [ "${1:-}" = "025" ]; then
+  TAG="${VENTUS_TAG:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0}"
+  echo "== 0.25 lane: protocol overlay on Anemll gx10"
+  docker build -f docker/Dockerfile.overlay-025 -t "$TAG" docker
+  echo "built: $TAG"
+  exit 0
+fi
 
 BASE_IMAGE="${VENTUS_BASE_IMAGE:-ghcr.io/bjk110/vllm-spark:unholy-fusion-prod-ready}"
 TAG="${VENTUS_TAG:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}"
