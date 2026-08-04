@@ -249,11 +249,15 @@ cmd_up() {
   run_worker "mkdir -p ~/.ventus-dspark"
   scp "${SSH_OPTS[@]}" "$COMPOSE" "${WORKER_USER}@$WORKER:~/.ventus-dspark/ventus-dspark.yml"
   scp "${SSH_OPTS[@]}" "$ENV_FILE" "${WORKER_USER}@$WORKER:~/.ventus-dspark/env.dspark"
-  run_worker "cd ~/.ventus-dspark && NODE_RANK=1 HEADLESS=1 VLLM_HOST_IP=$WORKER docker compose --env-file env.dspark -f ventus-dspark.yml up -d"
+  # --force-recreate: a TP rank from a previous NCCL world must never be
+  # reused — compose sees "same config, already running" and keeps a zombie
+  # whose TCPStore is dead, and the new head waits on it forever (lived
+  # 2026-08-04 during the first fleet-boot drill).
+  run_worker "cd ~/.ventus-dspark && NODE_RANK=1 HEADLESS=1 VLLM_HOST_IP=$WORKER docker compose --env-file env.dspark -f ventus-dspark.yml up -d --force-recreate"
 
   log "starting head rank..."
   cd "$SCRIPT_DIR"
-  NODE_RANK=0 HEADLESS= docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d
+  NODE_RANK=0 HEADLESS= docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --force-recreate
 
   log "waiting for API on :$VLLM_PORT (cold boot ~15 min)..."
   local i=0
