@@ -45,6 +45,11 @@ worker first, waits for health, and prints your endpoint:
 - **Both APIs.** OpenAI-compatible (`/v1/chat/completions`, AIDE/Codex) and
   Anthropic-compatible (`/v1/messages`, Claude Code), tool calling and
   reasoning content included.
+- **Reasoning that actually arrives.** 0731 ships no Jinja chat template —
+  reasoning is driven by the checkpoint's own encoder via
+  `chat_template_kwargs`. Anthropic clients send a `thinking` block instead,
+  so the overlay translates it; without that, Claude Code asks for extended
+  thinking and silently gets none. See [Reasoning effort](#reasoning-effort).
 
 ## Measured on a 2× DGX Spark fleet (2026-07-31)
 
@@ -57,6 +62,51 @@ worker first, waits for health, and prints your endpoint:
 | APIs | health 200, tool calls, reasoning content, math, 1M `/v1/models` |
 
 Full methodology and config: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+Reproduce on your own fleet:
+
+```bash
+./scripts/benchmark.py --output results/ventus-dspark-0731.json
+```
+
+Two profiles: `--profile strict` (default — temperature 0, three trials,
+median, one discarded warmup) and `--profile compat`, which reproduces the
+sampling and single-trial conditions other published DGX Spark tables use so
+the numbers are comparable. `--corpus code` swaps the repeated filler prompt
+for real source text; the gap between the two corpora is how much DSpark
+acceptance the filler was inflating. Draft acceptance is read from
+`/metrics` per case, because acceptance is what explains a decode number.
+
+## Reasoning effort
+
+The 0731 checkpoint has no Jinja `chat_template`. `--tokenizer-mode
+deepseek_v4` calls the checkpoint's `encoding/encoding_dsv4.py`, which takes
+`off`, `low`, `high` or `max` — `low` is the base mode (opens `<think>` with
+no effort prefix).
+
+Set the server default at launch:
+
+```bash
+./ventus-dspark up --worker 192.168.1.2 --thinking high
+```
+
+Default is `off`. Request-level settings always win over it.
+
+- **OpenAI path** — nest it, don't use the top-level `reasoning_effort`
+  field; vLLM does not route that into the encoder:
+  `"chat_template_kwargs": {"thinking": true, "reasoning_effort": "high"}`
+- **Anthropic path** — send the normal Anthropic block, and the overlay
+  translates it: `"thinking": {"type": "enabled", "budget_tokens": 8192}`.
+  Budget maps to effort at 4096 (`high`) and 16384 (`max`); below that,
+  `low`. Setting `chat_template_kwargs` explicitly overrides the mapping.
+
+## Tests
+
+```bash
+pip install pytest pydantic && python -m pytest tests/ -q
+```
+
+Overlay unit tests are pure pydantic — no GPU, no cluster, no image.
 
 ## Building the image yourself
 
@@ -78,7 +128,9 @@ see [CREDITS.md](CREDITS.md)). The final image verifies itself with
 ventus-dspark               the one command (up/down, --dry-run)
 compose/ventus-dspark.yml   compose service (worker/head roles)
 scripts/build.sh            reproducible image build
+scripts/benchmark.py        prefill/decode/acceptance sweep (stdlib only)
 docker/                     vendored overlay + stage Dockerfiles (MIT)
+tests/                      overlay unit tests (no GPU required)
 docs/VALIDATION.md          measured numbers + methodology
 ```
 
