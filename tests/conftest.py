@@ -21,8 +21,22 @@ def load_overlay_module(relative_path, name):
     return module
 
 
-@pytest.fixture(scope="session")
-def anthropic_protocol():
-    return load_overlay_module(
-        "vllm/entrypoints/anthropic/protocol.py", "ventus_anthropic_protocol"
+# Both engine lanes carry the same thinking-translation patch; every
+# protocol test runs against each so a port can't silently drift.
+OVERLAY_ROOT = Path(__file__).resolve().parent.parent / "docker"
+PROTOCOL_LANES = {
+    "v021": "overlay/vllm/entrypoints/anthropic/protocol.py",
+    "v025": "overlay-025/vllm/entrypoints/anthropic/protocol.py",
+}
+
+
+@pytest.fixture(scope="session", params=sorted(PROTOCOL_LANES))
+def anthropic_protocol(request):
+    relative = PROTOCOL_LANES[request.param]
+    spec = importlib.util.spec_from_file_location(
+        f"ventus_anthropic_protocol_{request.param}", OVERLAY_ROOT / relative
     )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module

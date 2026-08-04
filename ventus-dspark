@@ -16,12 +16,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE="$SCRIPT_DIR/compose/ventus-dspark.yml"
 ENV_DIR="$SCRIPT_DIR/.ventus"
 ENV_FILE="$ENV_DIR/env.dspark"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
-IMAGE="${VENTUS_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}"
+# Engine lane: 021 (default, bjk110 base) or 025 (Anemll vLLM 0.25 port).
+# Each lane has its own compose file and image; they are not mix-and-match —
+# overlay files from one vLLM version crash the other.
+ENGINE="${VENTUS_ENGINE:-021}"
+IMAGE="${VENTUS_IMAGE:-}"
 VLLM_PORT=8000
 MASTER_PORT=25000
 # $USER is unset under cron, systemd and non-interactive ssh; set -u turns
@@ -31,7 +34,7 @@ DRY_RUN=0
 
 # Validated engine constants — changing any of these without re-measuring on
 # the same hardware is how you lose the numbers in docs/VALIDATION.md.
-GPU_MEMORY_UTILIZATION="${VENTUS_GMU:-0.78}"
+GPU_MEMORY_UTILIZATION="${VENTUS_GMU:-}"
 MAX_NUM_SEQS="${VENTUS_SEQS:-6}"
 # Server-side reasoning default. The 0731 checkpoint has no Jinja
 # chat_template; its encoding_dsv4.py encoder takes off|low|high|max. "low"
@@ -45,6 +48,23 @@ NCCL_IB_GID_INDEX=""
 NCCL_IB_HCA=""
 NCCL_SOCKET_IFNAME=""
 
+resolve_engine() {
+  case "$ENGINE" in
+    021)
+      COMPOSE="$SCRIPT_DIR/compose/ventus-dspark.yml"
+      [ -n "$IMAGE" ] || IMAGE="ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0"
+      # 0.80 dies on the first real request on this lane; see VALIDATION.md.
+      [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.78
+      ;;
+    025)
+      COMPOSE="$SCRIPT_DIR/compose/ventus-dspark-025.yml"
+      [ -n "$IMAGE" ] || IMAGE="ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0"
+      [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.80
+      ;;
+    *) fatal "--engine must be 021 or 025 (got '$ENGINE')" ;;
+  esac
+}
+
 usage() {
   sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   echo
@@ -56,8 +76,9 @@ usage() {
   echo "  --worker <ip>     worker node fabric IP (required)"
   echo "  --model <dir>     weights directory on BOTH nodes (default ~/models/v4-flash-0731)"
   echo "  --port <n>        API port (default 8000)"
-  echo "  --image <tag>     runtime image (default $IMAGE)"
+  echo "  --image <tag>     runtime image (default depends on --engine)"
   echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
+  echo "  --engine <lane>   021 (default) or 025 (vLLM 0.25, ~+40% decode, experimental)"
 }
 
 log() { printf '\033[36m[ventus-dspark]\033[0m %s\n' "$*"; }
@@ -266,11 +287,13 @@ while [ $# -gt 0 ]; do
         *) fatal "--thinking must be one of: off low high max (got '$2')" ;;
       esac
       shift ;;
+    --engine) ENGINE="$2"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; fatal "unknown argument: $1" ;;
   esac
   shift
 done
+resolve_engine
 case "${CMD:-}" in
   up) cmd_up ;;
   down) cmd_down ;;
