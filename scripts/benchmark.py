@@ -40,10 +40,13 @@ PROFILES = {
     "strict": {"temperature": 0.0, "top_p": 1.0, "trials": 3, "warmup": 1},
 }
 
-# vLLM has renamed these counters across versions; match on substring and sum
-# over label sets rather than pinning an exact metric name.
-ACCEPTED_RE = re.compile(r"^[a-z_:]*spec_decode_num_accepted_tokens[a-z_]*\{?")
-DRAFTED_RE = re.compile(r"^[a-z_:]*spec_decode_num_draft_tokens[a-z_]*\{?")
+# Match the cumulative counter and nothing else. vLLM also exposes a
+# `_created` sibling (a unix timestamp) and a `_per_pos_total` breakdown for
+# each of these; summing the family would add epoch-seconds to a token count
+# and double-count the per-position rows. The metric prefix varies by
+# version, so only the leading namespace is loose.
+ACCEPTED_RE = re.compile(r"^[a-z_:]*spec_decode_num_accepted_tokens_total(\{|$)")
+DRAFTED_RE = re.compile(r"^[a-z_:]*spec_decode_num_draft_tokens_total(\{|$)")
 
 CODE_SUFFIXES = (".py", ".sh", ".yml", ".yaml", ".md", ".toml")
 
@@ -56,6 +59,11 @@ def post_json(url, body, timeout=3600):
             request = urllib.request.Request(url, data=payload, headers=headers)
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.load(response)
+        except urllib.error.HTTPError as error:
+            # A bare "HTTP Error 404" says nothing about which endpoint was
+            # missing; 4xx will not fix itself on retry either.
+            detail = error.read()[:400].decode(errors="replace")
+            raise RuntimeError(f"POST {url} -> HTTP {error.code}: {detail}") from None
         except urllib.error.URLError:
             if attempt == 3:
                 raise
@@ -77,6 +85,15 @@ def scrape_spec_decode(base_url):
             body = response.read().decode()
     except urllib.error.URLError:
         return None
+    return parse_spec_decode(body)
+
+
+def parse_spec_decode(body):
+    """Sum the spec-decode totals across label sets in a Prometheus exposition.
+
+    Returns None rather than zeros when the counters are absent, so a missing
+    metric reads as "unknown" in the report instead of "no acceptance".
+    """
     accepted = drafted = None
     for line in body.splitlines():
         if line.startswith("#"):
@@ -333,4 +350,5 @@ async def main():
     print(f"\nwrote {path}", flush=True)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
