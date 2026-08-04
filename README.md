@@ -135,13 +135,25 @@ tests/                      overlay unit tests (no GPU required)
 docs/VALIDATION.md          measured numbers + methodology
 ```
 
+## Engine lanes
+
+Two engine lanes, selected with `--engine` (or `VENTUS_ENGINE`):
+
+- **025** (default) — Anemll's GB10 port of vLLM 0.25.1, DSpark/NVFP4/b12x
+  baked in, our `/v1/messages` thinking overlay on top. Measured +8.4% decode
+  and +15% KV pool over 021 (see [docs/VALIDATION.md](docs/VALIDATION.md)).
+  Build: `./scripts/build.sh 025`.
+- **021** — the original bjk110-based Stage-C chain, kept as the rollback
+  lane. Build: `./scripts/build.sh`.
+
+The lanes are not mix-and-match: overlay files from one vLLM version crash
+the other, which is why each lane has its own compose file and image.
+
 ## Roadmap
 
-- digest-pinned base + SBOM + cosign signature
-- ARM64 GitHub Actions build so `docker pull` is fully reproducible
-- automatic weight bootstrap (`hf download`, resumable)
+- SBOM + keyless cosign signing for the 025 image (021 has it)
 - upstream tracking: when vLLM merges SM12x support (PR #41834), swap the
-  base for mainline and re-measure
+  025 base for mainline and re-measure
 
 ## License
 
