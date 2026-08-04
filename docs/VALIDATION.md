@@ -80,8 +80,11 @@ not a lifetime warranty.
 
 - **gmu 0.78, not 0.80/0.85:** spec-decode buffers allocate on the *first real
   request*, not at boot — 0.80 boots clean then dies under traffic.
-- **k=5, not 7:** the card's `num_speculative_tokens: 7` crashes on first
-  generation ("size of tensor a (7) must match tensor b (5)"). k=6 wastes a
+- **k=5, not 7 (0.21 lane only):** the card's `num_speculative_tokens: 7`
+  crashes the 0.21 engine on first generation ("size of tensor a (7) must
+  match tensor b (5)"). The 0.25 engine has no such constraint and k=7 is
+  DeepSeek's own recommendation — untested here, queued in
+  [EXPERIMENTS.md](EXPERIMENTS.md). k=6 wastes a
   dead slot. Valid: k ≤ 5 or a multiple of 5.
 - **Single HCA:** the second IB port on many Sparks has no RoCEv2 GID;
   NCCL hits it and fails the QP handshake with no readable exception.
