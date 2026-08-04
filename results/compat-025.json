@@ -1,5 +1,5 @@
 {
-  "base_url": "http://192.168.0.101:8000/v1",
+  "base_url": "http://HEAD_NODE:8000/v1",
   "cases": [
     {
       "acceptance": 0.7394495412844037,

@@ -20,10 +20,11 @@ ENV_DIR="$SCRIPT_DIR/.ventus"
 ENV_FILE="$ENV_DIR/env.dspark"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
-# Engine lane: 021 (default, bjk110 base) or 025 (Anemll vLLM 0.25 port).
-# Each lane has its own compose file and image; they are not mix-and-match —
-# overlay files from one vLLM version crash the other.
-ENGINE="${VENTUS_ENGINE:-021}"
+# Engine lane: 025 (default, Anemll vLLM 0.25 port — +8% decode, +15% KV
+# pool vs 021, see docs/VALIDATION.md) or 021 (bjk110 base, kept for
+# rollback). Each lane has its own compose file and image; they are not
+# mix-and-match — overlay files from one vLLM version crash the other.
+ENGINE="${VENTUS_ENGINE:-025}"
 IMAGE="${VENTUS_IMAGE:-}"
 VLLM_PORT=8000
 MASTER_PORT=25000
@@ -78,7 +79,7 @@ usage() {
   echo "  --port <n>        API port (default 8000)"
   echo "  --image <tag>     runtime image (default depends on --engine)"
   echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
-  echo "  --engine <lane>   021 (default) or 025 (vLLM 0.25, ~+40% decode, experimental)"
+  echo "  --engine <lane>   025 (default, vLLM 0.25) or 021 (rollback lane)"
 }
 
 log() { printf '\033[36m[ventus-dspark]\033[0m %s\n' "$*"; }

@@ -55,10 +55,11 @@ worker first, waits for health, and prints your endpoint:
 
 | metric | value |
 |---|---|
-| context window | 1,048,576 (1M), KV pool 1,468,303 tokens → 1.4× concurrency at 1M |
-| prefill | ~1,750 tok/s at 22.5K-token prompts |
-| decode | 56.9 tok/s mean, 78.6 peak (Patch 4, ~60% draft acceptance) |
-| boot | ~12–15 min cold, ~7 min warm (cached autotune) |
+| context window | 1,048,576 (1M), KV pool 1,691,551 tokens (0.25 engine) |
+| prefill | ~1,750–1,990 tok/s single-stream |
+| decode | 72–81 tok/s single-stream; ~194 tok/s aggregate at 6 streams |
+| draft acceptance | ~0.56 real code, ~0.70–0.88 predictable text — decode tracks this |
+| boot | ~12–15 min cold, ~5 min warm (cached autotune) |
 | APIs | health 200, tool calls, reasoning content, math, 1M `/v1/models` |
 
 Full methodology and config: [docs/VALIDATION.md](docs/VALIDATION.md).
