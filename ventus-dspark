@@ -207,10 +207,20 @@ EOF
 
 cmd_up() {
   [ -n "$WORKER" ] || { usage; fatal "--worker is required"; }
-  [ -f "$MODEL/config.json" ] || fatal "no config.json in --model $MODEL (run on BOTH nodes)"
+  if [ ! -f "$MODEL/config.json" ]; then
+    log "no weights at $MODEL — to fetch them (resumable, ~155 GB for 0731):"
+    log "  ./scripts/fetch-weights.sh --dir $MODEL"
+    log "then copy to the worker over the fabric link:"
+    log "  rsync -a --partial --info=progress2 $MODEL/ $WORKER:$MODEL/"
+    fatal "weights missing on the head node"
+  fi
   command -v docker >/dev/null || fatal "docker not found on head"
   run_worker "command -v docker >/dev/null" || fatal "docker not found on worker ($WORKER)"
-  run_worker "[ -f '$MODEL/config.json' ]" || fatal "no config.json in --model $MODEL on the worker"
+  if ! run_worker "[ -f '$MODEL/config.json' ]"; then
+    log "weights missing on the worker — copy them over the fabric link:"
+    log "  rsync -a --partial --info=progress2 $MODEL/ $WORKER:$MODEL/"
+    fatal "weights missing on the worker ($WORKER)"
+  fi
 
   HEAD_IP="$(ip route get "$WORKER" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
   [ -n "$HEAD_IP" ] || fatal "cannot determine head fabric IP for route to $WORKER"
