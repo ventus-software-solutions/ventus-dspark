@@ -96,6 +96,9 @@ services:
         export CUDAToolkit_ROOT="$${CUDAToolkit_ROOT:-$${CUDA_HOME}}";
         export LD_LIBRARY_PATH="/opt/env/lib:/opt/env/targets/sbsa-linux/lib:$${LD_LIBRARY_PATH:-}";
         SPECULATIVE_CONFIG="{\"method\":\"dspark\",\"num_speculative_tokens\":${MTP_NUM_TOKENS:-5},\"draft_sample_method\":\"probabilistic\"}";
+        THINKING="${DEFAULT_THINKING:-off}";
+        if [ "$${THINKING}" = "off" ]; then CHAT_KWARGS='{"thinking":false}';
+        else CHAT_KWARGS="{\"thinking\":true,\"reasoning_effort\":\"$${THINKING}\"}"; fi;
         exec /opt/env/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-DSpark}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-dspark}
         --host ${VLLM_HOST:-127.0.0.1}
@@ -120,7 +123,7 @@ services:
         --enable-auto-tool-choice
         --reasoning-parser deepseek_v4
         --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
-        --default-chat-template-kwargs '{"thinking":false}'
+        --default-chat-template-kwargs "$${CHAT_KWARGS}"
         --generation-config vllm
         --enable-flashinfer-autotune
         --nnodes 2

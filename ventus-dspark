@@ -24,13 +24,20 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 IMAGE="${VENTUS_IMAGE:-ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0}"
 VLLM_PORT=8000
 MASTER_PORT=25000
-WORKER_USER="${VENTUS_WORKER_USER:-$USER}"
+# $USER is unset under cron, systemd and non-interactive ssh; set -u turns
+# that into a crash before the first line of output.
+WORKER_USER="${VENTUS_WORKER_USER:-${USER:-$(id -un)}}"
 DRY_RUN=0
 
 # Validated engine constants — changing any of these without re-measuring on
 # the same hardware is how you lose the numbers in docs/VALIDATION.md.
 GPU_MEMORY_UTILIZATION="${VENTUS_GMU:-0.78}"
 MAX_NUM_SEQS="${VENTUS_SEQS:-6}"
+# Server-side reasoning default. The 0731 checkpoint has no Jinja
+# chat_template; its encoding_dsv4.py encoder takes off|low|high|max. "low"
+# is the base mode (opens <think>, no effort prefix). Request-level
+# chat_template_kwargs always win over this.
+DEFAULT_THINKING="${VENTUS_THINKING:-off}"
 MAX_NUM_BATCHED_TOKENS=8192
 MTP_NUM_TOKENS=""
 MAX_MODEL_LEN=""
@@ -50,6 +57,7 @@ usage() {
   echo "  --model <dir>     weights directory on BOTH nodes (default ~/models/v4-flash-0731)"
   echo "  --port <n>        API port (default 8000)"
   echo "  --image <tag>     runtime image (default $IMAGE)"
+  echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
 }
 
 log() { printf '\033[36m[ventus-dspark]\033[0m %s\n' "$*"; }
@@ -136,6 +144,7 @@ MAX_NUM_SEQS=$MAX_NUM_SEQS
 MAX_NUM_BATCHED_TOKENS=$MAX_NUM_BATCHED_TOKENS
 GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION
 MTP_NUM_TOKENS=$MTP_NUM_TOKENS
+DEFAULT_THINKING=$DEFAULT_THINKING
 VLLM_USE_FLASHINFER_SAMPLER=1
 VLLM_USE_B12X_MOE=1
 VLLM_USE_B12X_WO_PROJECTION=1
@@ -199,6 +208,13 @@ cmd_up() {
   log "dspark k=$MTP_NUM_TOKENS context=$MAX_MODEL_LEN (from checkpoint config)"
   [ "$MTP_NUM_TOKENS" -le 5 ] || fatal "k=$MTP_NUM_TOKENS unsupported: drafter emits 5, k must be <=5 or a multiple of 5"
 
+  # Also catches a bad VENTUS_THINKING from the environment, not just --thinking.
+  case "$DEFAULT_THINKING" in
+    off|low|high|max) ;;
+    *) fatal "thinking level '$DEFAULT_THINKING' invalid: use off, low, high or max" ;;
+  esac
+  log "reasoning default: $DEFAULT_THINKING (request-level overrides win)"
+
   gen_env
   log "env -> $ENV_FILE"
   if [ "$DRY_RUN" = "1" ]; then
@@ -244,6 +260,12 @@ while [ $# -gt 0 ]; do
     --model) MODEL="$2"; shift ;;
     --port) VLLM_PORT="$2"; shift ;;
     --image) IMAGE="$2"; shift ;;
+    --thinking)
+      case "$2" in
+        off|low|high|max) DEFAULT_THINKING="$2" ;;
+        *) fatal "--thinking must be one of: off low high max (got '$2')" ;;
+      esac
+      shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; fatal "unknown argument: $1" ;;
   esac

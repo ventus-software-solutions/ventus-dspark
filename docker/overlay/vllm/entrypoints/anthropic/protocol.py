@@ -100,6 +100,36 @@ class AnthropicToolChoice(BaseModel):
         return self
 
 
+class AnthropicThinkingConfig(BaseModel):
+    """Anthropic extended-thinking block.
+
+    Clients (Claude Code) ask for reasoning with this. DeepSeek-V4-Flash-0731
+    has no Jinja chat_template — its encoding_dsv4.py encoder reads
+    `thinking` / `reasoning_effort` from chat_template_kwargs instead — so
+    this has to be translated. See translate_thinking below.
+    """
+
+    type: Literal["enabled", "disabled"]
+    budget_tokens: int | None = None
+
+
+# budget_tokens is a continuous budget; the encoder takes three discrete
+# levels. These thresholds are a judgement call, not an upstream mapping:
+# Anthropic's floor is 1024, and Claude Code's common budgets cluster around
+# 4k (normal) and 16k+ (deep). "low" is the encoder's base mode — it opens
+# <think> with no effort prefix.
+THINKING_BUDGET_THRESHOLDS = ((16384, "max"), (4096, "high"), (0, "low"))
+
+
+def budget_to_reasoning_effort(budget_tokens: int | None) -> str:
+    if budget_tokens is None:
+        return "low"
+    for floor, effort in THINKING_BUDGET_THRESHOLDS:
+        if budget_tokens >= floor:
+            return effort
+    return "low"
+
+
 class AnthropicMessagesRequest(BaseModel):
     """Anthropic Messages API request"""
 
@@ -111,6 +141,7 @@ class AnthropicMessagesRequest(BaseModel):
     stream: bool | None = False
     system: str | list[AnthropicContentBlock] | None = None
     temperature: float | None = None
+    thinking: AnthropicThinkingConfig | None = None
     tool_choice: AnthropicToolChoice | None = None
     tools: list[AnthropicTool] | None = None
     top_k: int | None = None
@@ -142,6 +173,33 @@ class AnthropicMessagesRequest(BaseModel):
         if v <= 0:
             raise ValueError("max_tokens must be positive")
         return v
+
+    @model_validator(mode="after")
+    def translate_thinking(self) -> "AnthropicMessagesRequest":
+        """Fold the Anthropic thinking block into chat_template_kwargs.
+
+        Without this the block is silently dropped and the server-side
+        --default-chat-template-kwargs wins, so a client asking for extended
+        thinking gets none and sees no error.
+
+        A caller who sets a key in chat_template_kwargs directly is speaking
+        vLLM's own dialect and is not second-guessed; only absent keys are
+        filled in.
+        """
+        if self.thinking is None:
+            return self
+
+        kwargs = dict(self.chat_template_kwargs or {})
+        if self.thinking.type == "disabled":
+            kwargs.setdefault("thinking", False)
+        else:
+            kwargs.setdefault("thinking", True)
+            kwargs.setdefault(
+                "reasoning_effort",
+                budget_to_reasoning_effort(self.thinking.budget_tokens),
+            )
+        self.chat_template_kwargs = kwargs
+        return self
 
 
 class AnthropicDelta(BaseModel):
