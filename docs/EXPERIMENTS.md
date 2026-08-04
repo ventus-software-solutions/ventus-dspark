@@ -46,6 +46,15 @@ revert by env. Keep whatever the benchmark confirms; the decision rule is
 - **Tree drafting / lossy acceptance / ngram+model hybrid**: not available
   in vLLM 0.25/0.26; dead ends for now.
 
+- **Fusing the sequential Markov sampling loop**: profiled on the lab pair
+  (CUDA events around backbone vs `_sample_sequential`) — 46% of draft time
+  in eager mode, but that share is launch-overhead artifact: the same server
+  drops 180→25 tok/s without CUDA graphs, and production graphs amortize the
+  ~28 per-round kernel launches to ~100µs of on-GPU overhead against a much
+  heavier DSV4F backbone. Estimated production gain ~1%; not worth building.
+  Useful corollary: the draft BACKBONE forward is the production bottleneck —
+  the fused draft-MLA kernel below is the lever that matters.
+
 ## Watch (act when upstream ships)
 
 - **vLLM 0.27 fused draft-attention** (#50911, merged): 2.3–7.3x per-layer
