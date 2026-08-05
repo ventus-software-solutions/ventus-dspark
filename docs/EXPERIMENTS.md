@@ -1,5 +1,31 @@
 # Experiment backlog — speculative decoding (2026-08-04/05)
 
+## Status of the first A/B attempt (2026-08-05 evening, paused)
+
+Run with `VENTUS_K=7` +
+`VENTUS_SPEC_EXTRA=',"rejection_sample_method":"block","num_speculative_tokens_per_batch_size":[[1,2,7],[3,8,5]]'`.
+
+- k5 baseline banked (strict, temp 0, quality probes in
+  `results/quality-k5.json`, cells in `results/ab-k5-{a,b}.json`):
+  p2048c1 51.6 / p8192c1 67.0 / p2048c4 agg 112.7 / p8192c4 agg 79.1 /
+  p256c6 agg 194.3 tok/s.
+- Full combo (k7+block+schedule) FAILED the quality gate: temp-0 outputs
+  nondeterministic even on a quiet endpoint (three identical requests,
+  three different answers). Greedy output must be batch-shape-stable within
+  a config; something in the combo breaks that. Prime suspect:
+  `num_speculative_tokens_per_batch_size` (docs say untested with dspark;
+  the DSpark speculator preallocates fixed-k buffers).
+- Isolation ladder for next session: (1) k7+block, no schedule → probe
+  determinism; (2) k7 alone; (3) if k7 alone fails, reject and keep k5.
+  Cluster reverted to k5 defaults meanwhile.
+
+Operational note from the same day: worker gx10-2 hard-hung after ~20h at
+gmu 0.80 (NVRM out-of-memory kernel checks, then the GB10 full-host wedge);
+the 025 lane default is 0.78 now. gx10-2's fabric port also has a chronic
+DHCP-flap misconfig (a second NM profile, ~3.5k failures since Jul 31) —
+fix pending. Add engine liveness monitoring: the head engine died with exit
+code 0 and a oneshot systemd unit noticed nothing for 90 minutes.
+
 Findings from a research + code-review + local-lab pass on raising DSpark
 decode throughput. Nothing here is deployed; the fleet A/B below is ready to
 run whenever the cluster can take one restart + ~40 min of benchmark cells.

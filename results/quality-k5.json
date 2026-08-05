@@ -1,0 +1,8 @@
+{
+ "math": "33033",
+ "code": "```python\ndef merge(a, b):\n    result = []\n    i = j = 0\n    while i < len(a) and j < len(b):\n        if a[i] <= b[j]:\n            result.append(a[i])\n            i += 1\n        else:\n            result.append(b[j])\n            j += 1\n    result.extend(a[i:])\n    result.extend(b[j:])\n    return result\n```",
+ "prose": "The sky appears blue because air molecules scatter sunlight in all directions, and blue light, having a shorter wavelength, is scattered much more efficiently than other colors. This phenomenon, known as Rayleigh scattering, means our eyes receive a dominant blue signal from the sky, especially when the sun is high.",
+ "json": "{\"name\": \"test\", \"primes\": [2, 3, 5, 7, 11]}",
+ "long": "1: 1  \n2: 4  \n3: 9  \n4: 16  \n5: 25  \n6: 36  \n7: 49  \n8: 64  \n9: 81  \n10: 100  \n11: 121  \n12: 144  \n13: 169  \n14: 196  \n15: 225  \n16: 256  \n17: 289  \n18: 324  \n19: 361  \n20: 400",
+ "tool": "{\"arguments\": \"{\\\"city\\\": \\\"Berlin\\\"}\", \"name\": \"get_weather\"}"
+}
