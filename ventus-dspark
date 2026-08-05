@@ -32,6 +32,9 @@ MASTER_PORT=25000
 # that into a crash before the first line of output.
 WORKER_USER="${VENTUS_WORKER_USER:-${USER:-$(id -un)}}"
 DRY_RUN=0
+# Optional speculative-config additions, e.g. (see docs/EXPERIMENTS.md):
+#   VENTUS_SPEC_EXTRA=',"rejection_sample_method":"block"'
+VENTUS_SPEC_EXTRA="${VENTUS_SPEC_EXTRA:-}"
 
 # Validated engine constants — changing any of these without re-measuring on
 # the same hardware is how you lose the numbers in docs/VALIDATION.md.
@@ -166,6 +169,7 @@ MAX_NUM_SEQS=$MAX_NUM_SEQS
 MAX_NUM_BATCHED_TOKENS=$MAX_NUM_BATCHED_TOKENS
 GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION
 MTP_NUM_TOKENS=$MTP_NUM_TOKENS
+SPECULATIVE_CONFIG_JSON={"method":"dspark","num_speculative_tokens":$MTP_NUM_TOKENS,"draft_sample_method":"probabilistic"$VENTUS_SPEC_EXTRA}
 DEFAULT_THINKING=$DEFAULT_THINKING
 VLLM_USE_FLASHINFER_SAMPLER=1
 VLLM_USE_B12X_MOE=1
@@ -235,10 +239,18 @@ cmd_up() {
   NCCL_SOCKET_IFNAME="$(ip route get "$WORKER" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
   log "IB: $NCCL_IB_HCA gid=$NCCL_IB_GID_INDEX eth=$NCCL_SOCKET_IFNAME"
 
-  MTP_NUM_TOKENS="$(checkpoint_k)"
+  BLOCK_K="$(checkpoint_k)"
+  MTP_NUM_TOKENS="${VENTUS_K:-$BLOCK_K}"
   MAX_MODEL_LEN="$(checkpoint_ctx)"
-  log "dspark k=$MTP_NUM_TOKENS context=$MAX_MODEL_LEN (from checkpoint config)"
-  [ "$MTP_NUM_TOKENS" -le 5 ] || fatal "k=$MTP_NUM_TOKENS unsupported: drafter emits 5, k must be <=5 or a multiple of 5"
+  log "dspark block=$BLOCK_K k=$MTP_NUM_TOKENS context=$MAX_MODEL_LEN"
+  if [ "$ENGINE" = "021" ]; then
+    # The 0.21 engine crashes on k>5 ("size of tensor a (7) must match b (5)").
+    [ "$MTP_NUM_TOKENS" -le 5 ] || fatal "k=$MTP_NUM_TOKENS unsupported on the 021 lane (crashes >5)"
+  else
+    # 0.25+: any k >= block is legal — the drafter extends its block in the
+    # same parallel pass. k < block is rejected by the engine itself.
+    [ "$MTP_NUM_TOKENS" -ge "$BLOCK_K" ] || fatal "k=$MTP_NUM_TOKENS < drafter block $BLOCK_K"
+  fi
 
   # Also catches a bad VENTUS_THINKING from the environment, not just --thinking.
   case "$DEFAULT_THINKING" in

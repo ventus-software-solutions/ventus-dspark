@@ -70,7 +70,8 @@ services:
         export CUDA_PATH="$${CUDA_PATH:-$${CUDA_HOME}}";
         export CUDAToolkit_ROOT="$${CUDAToolkit_ROOT:-$${CUDA_HOME}}";
         export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$${LD_LIBRARY_PATH:-}";
-        SPECULATIVE_CONFIG="{\"method\":\"dspark\",\"num_speculative_tokens\":${MTP_NUM_TOKENS:-5},\"draft_sample_method\":\"probabilistic\"}";
+        SPECULATIVE_CONFIG='${SPECULATIVE_CONFIG_JSON}';
+        [ -n "$${SPECULATIVE_CONFIG}" ] || SPECULATIVE_CONFIG='{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}';
         THINKING="${DEFAULT_THINKING:-off}";
         if [ "$${THINKING}" = "off" ]; then CHAT_KWARGS='{"thinking":false}';
         else CHAT_KWARGS="{\"thinking\":true,\"reasoning_effort\":\"$${THINKING}\"}"; fi;
