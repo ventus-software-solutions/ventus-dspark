@@ -15,9 +15,16 @@ Run with `VENTUS_K=7` +
   a config; something in the combo breaks that. Prime suspect:
   `num_speculative_tokens_per_batch_size` (docs say untested with dspark;
   the DSpark speculator preallocates fixed-k buffers).
-- Isolation ladder for next session: (1) k7+block, no schedule → probe
-  determinism; (2) k7 alone; (3) if k7 alone fails, reject and keep k5.
-  Cluster reverted to k5 defaults meanwhile.
+- CORRECTION after revert: the same prose probe flips on k5-vs-k5 too —
+  the "nondeterminism" is a floating-point near-tie in that one prompt,
+  batch-shape-sensitive at ANY k, not an experiment defect. The other five
+  probes (math, code, json, tool-call, list) were byte-identical across
+  k5 → k7+block+schedule → k5. The gate was too naive, not the combo broken.
+- Next session: fix the gate first — drop or multi-sample the near-tie
+  probe, verify zero concurrent requests via /metrics before probing —
+  then rerun the combo and take the strict cells. The k7 quality evidence
+  so far is positive, not negative. Cluster reverted to k5 defaults
+  meanwhile.
 
 Operational note from the same day: worker gx10-2 hard-hung after ~20h at
 gmu 0.80 (NVRM out-of-memory kernel checks, then the GB10 full-host wedge);
