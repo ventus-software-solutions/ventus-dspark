@@ -63,7 +63,10 @@ resolve_engine() {
     025)
       COMPOSE="$SCRIPT_DIR/compose/ventus-dspark-025.yml"
       [ -n "$IMAGE" ] || IMAGE="ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0"
-      [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.80
+      # 0.78, not Anemll's 0.80: the worker accumulated NVRM out-of-memory
+      # kernel checks over 20h at 0.80 and hard-hung (2026-08-05) — the same
+      # margin lesson VALIDATION.md already recorded for the 021 lane.
+      [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.78
       ;;
     *) fatal "--engine must be 021 or 025 (got '$ENGINE')" ;;
   esac
