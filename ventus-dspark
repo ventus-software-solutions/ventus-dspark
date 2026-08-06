@@ -454,26 +454,49 @@ cmd_status() {
 
   # Acceptance: prefer the gauge, fall back to the counters. Metric names have
   # moved between vLLM releases and both lanes are supported, so try each.
-  local alpha acc draft
+  #
+  # The counters are cumulative, so their ratio is the average since boot — on
+  # a box that has run benchmarks that reads as a permanent "low acceptance"
+  # warning long after the traffic that caused it stopped. The second metrics
+  # sample taken for the decode rate is reused here to get the same window.
+  # One paired sample serves both the acceptance window and the decode rate:
+  # two scrapes two seconds apart, not four.
+  local METRICS2 alpha acc draft acc2 draft2
+  METRICS2=""
+  if printf '%s\n' "$METRICS" | grep -q 'spec_decode_num_draft_tokens_total\|generation_tokens_total'; then
+    sleep 2
+    METRICS2="$(curl -fsS --max-time 5 "$base/metrics" 2>/dev/null || true)"
+  fi
+  metric2() {
+    printf '%s\n' "$METRICS2" | awk -v k="$1" '
+      index($0, k) == 1 && (substr($0, length(k)+1, 1) ~ /[{ ]/) { v = $NF }
+      END { if (v != "") print v }'
+  }
+
   alpha="$(metric 'vllm:spec_decode_draft_acceptance_rate')"
   if [ -z "$alpha" ]; then
     acc="$(metric 'vllm:spec_decode_num_accepted_tokens_total')"
     draft="$(metric 'vllm:spec_decode_num_draft_tokens_total')"
-    if [ -n "$acc" ] && [ -n "$draft" ]; then
-      alpha="$(awk -v a="$acc" -v d="$draft" 'BEGIN{ if (d+0 > 0) print a/d }')"
+    if [ -n "$METRICS2" ]; then
+      acc2="$(metric2 'vllm:spec_decode_num_accepted_tokens_total')"
+      draft2="$(metric2 'vllm:spec_decode_num_draft_tokens_total')"
     fi
+    # Windowed when the window actually contains drafting; cumulative
+    # otherwise, rather than dividing by an idle gap and printing noise.
+    alpha="$(awk -v a="$acc" -v d="$draft" -v a2="${acc2:-}" -v d2="${draft2:-}" 'BEGIN{
+      dd = (d2=="" ? 0 : d2-d)
+      if (dd > 50) { print (a2-a)/dd }
+      else if (d+0 > 0) { print a/d }
+    }')"
   fi
 
-  # Decode rate. 0.25 exposes only a cumulative token counter (the 0.21-era
-  # avg_generation_throughput gauge is gone), so sample it twice and divide.
-  # Idle fleets have no rate to report — that is a dash, not a fault.
+  # Decode rate from the same pair of samples. 0.25 exposes only a cumulative
+  # token counter (the 0.21-era avg_generation_throughput gauge is gone).
+  # An idle fleet has no rate to report — that is a dash, not a fault.
   local tps t0 t1
   t0="$(metric 'vllm:generation_tokens_total')"
-  if [ -n "$t0" ]; then
-    sleep 2
-    t1="$(printf '%s' "$(curl -fsS --max-time 5 "$base/metrics" 2>/dev/null || true)"           | awk -v k='vllm:generation_tokens_total' '
-              index($0, k) == 1 && (substr($0, length(k)+1, 1) ~ /[{ ]/) { v = $NF }
-              END { if (v != "") print v }')"
+  t1="$(metric2 'vllm:generation_tokens_total')"
+  if [ -n "$t0" ] && [ -n "$t1" ]; then
     tps="$(awk -v a="$t0" -v b="$t1" 'BEGIN{ d=(b-a)/2; if (d > 0.05) print d }')"
   fi
   if [ -n "$tps" ] || [ -n "$alpha" ]; then

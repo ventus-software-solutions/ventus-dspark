@@ -35,7 +35,8 @@ _cache: dict = {"at": 0.0, "data": None}
 # Wall-clock of the last viewer request, for the idle endpoint above.
 _last_view: list = [0.0]
 # Previous raw counter sample, for deriving rates across polls.
-_prev: dict = {"at": 0.0, "gen": None, "prompt": None}
+_prev: dict = {"at": 0.0, "gen": None, "prompt": None,
+               "acc": None, "draft": None, "alpha": None}
 
 
 def _rate(name: str, key: str, m: dict, now: float):
@@ -127,11 +128,16 @@ def nodes():
 
 
 def acceptance(m: dict):
-    """Draft acceptance alpha.
+    """Draft acceptance alpha, over the recent window rather than since boot.
 
-    Prefer the gauge; fall back to the counters. The metric names moved
-    between vLLM releases and both engine lanes are supported, so try each
-    rather than assuming one.
+    The counters are cumulative, so dividing them gives the average over the
+    server's entire life — which on a box that has run benchmarks reads as a
+    permanent "low acceptance" warning long after the traffic that caused it
+    ended. Consecutive polls give the rate for the traffic happening NOW,
+    which is what an operator is actually asking about.
+
+    Falls back to the cumulative figure until two samples exist, and to the
+    gauge if a future engine exposes one.
     """
     for key in ("vllm:spec_decode_draft_acceptance_rate",
                 "vllm:spec_decode_efficiency"):
@@ -139,9 +145,23 @@ def acceptance(m: dict):
             return m[key]
     acc = m.get("vllm:spec_decode_num_accepted_tokens_total")
     draft = m.get("vllm:spec_decode_num_draft_tokens_total")
-    if acc is not None and draft:
-        return acc / draft
-    return None
+    if acc is None or draft is None:
+        return None
+
+    prev_acc, prev_draft = _prev.get("acc"), _prev.get("draft")
+    _prev["acc"], _prev["draft"] = acc, draft
+    if prev_acc is not None and prev_draft is not None:
+        d_draft = draft - prev_draft
+        # Only report a windowed value when the window actually contains
+        # drafting. An idle gap would otherwise divide by ~zero and print
+        # noise; holding the last value is more honest than inventing one.
+        if d_draft > 50:
+            alpha = (acc - prev_acc) / d_draft
+            _prev["alpha"] = alpha
+            return alpha
+        if _prev.get("alpha") is not None:
+            return _prev["alpha"]
+    return acc / draft if draft else None
 
 
 def collect() -> dict:
