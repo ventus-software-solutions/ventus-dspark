@@ -412,7 +412,9 @@ cmd_status() {
     tps="$(awk -v a="$t0" -v b="$t1" 'BEGIN{ d=(b-a)/2; if (d > 0.05) print d }')"
   fi
   if [ -n "$tps" ] || [ -n "$alpha" ]; then
-    printf '  %-12s %s tok/s' "decode" "${tps:+$(fmt "$tps" 1)}${tps:-–}"
+    # ${x:+a}${x:-b} prints BOTH branches when x is set — format once instead.
+    local shown="–"; [ -n "$tps" ] && shown="$(fmt "$tps" 1)"
+    printf '  %-12s %s tok/s' "decode" "$shown"
     [ -n "$alpha" ] && printf '     \033[36m← α %s\033[0m' "$(fmt "$alpha")"
     printf '\n'
   fi
