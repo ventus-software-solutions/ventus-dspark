@@ -548,8 +548,10 @@ cmd_dashboard() {
     docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" down >/dev/null 2>&1 || true
     # The collector notices the container is gone on its next tick and exits
     # on its own; kill it now so "stop" means stopped, not "stopped shortly".
+    local d="${VENTUS_TELEMETRY_DIR:-/tmp/ventus-telemetry}"
+    [ -f "$d/.collector.pid" ] && kill "$(cat "$d/.collector.pid")" 2>/dev/null || true
     pkill -f "ventus-telemetry-collector" 2>/dev/null || true
-    rm -rf "${VENTUS_TELEMETRY_DIR:-/tmp/ventus-telemetry}" 2>/dev/null || true
+    rm -rf "$d" 2>/dev/null || true
     log "dashboard stopped, telemetry collector stopped, samples removed"
     return 0
   fi
@@ -559,19 +561,7 @@ cmd_dashboard() {
   local dir="${VENTUS_TELEMETRY_DIR:-/tmp/ventus-telemetry}"
   [ -n "${WORKER:-}" ] || WORKER="${WORKER_HOST:-}"
 
-  # Replace any collector from a previous run so the interval and worker
-  # address always match this invocation.
-  pkill -f "ventus-telemetry-collector" 2>/dev/null || true
-  ( exec -a ventus-telemetry-collector bash -c \
-      "$(declare -f node_probe telemetry_loop); \
-       SCRIPT_DIR='$SCRIPT_DIR'; WORKER_USER='$WORKER_USER'; \
-       SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8); \
-       NODE_PROBE_TTL=0; DASH_PORT='$DASH_PORT'; \
-       VENTUS_NODE_PROBE_TTL='${VENTUS_NODE_PROBE_TTL:-10}'; \
-       VENTUS_TELEMETRY_IDLE='${VENTUS_TELEMETRY_IDLE:-45}'; \
-       telemetry_loop '$dir' '${WORKER:-}'" >/dev/null 2>&1 & )
-  log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s)"
-
+  mkdir -p "$dir"
   cd "$SCRIPT_DIR"
   # Rebuild only when it would change something: on every invocation it
   # orphans the previous layer and those dangling images pile up unnoticed
@@ -589,6 +579,25 @@ cmd_dashboard() {
   fi
   DASH_PORT="$DASH_PORT" NODE_TELEMETRY_DIR="$dir" \
     docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d "${build_flag[@]}"
+
+  # Collector starts AFTER the container. Its first act each tick is to check
+  # the dashboard still exists, so starting it first made it exit immediately
+  # and the telemetry directory stayed empty.
+  #
+  # It records its pid: identifying it by command line is unreliable because a
+  # `pgrep -f ventus-telemetry-collector` also matches any shell that merely
+  # mentions the name — an easy way to measure or kill the wrong process.
+  pkill -f "ventus-telemetry-collector" 2>/dev/null || true
+  ( exec -a ventus-telemetry-collector bash -c \
+      "$(declare -f node_probe telemetry_loop); \
+       SCRIPT_DIR='$SCRIPT_DIR'; WORKER_USER='$WORKER_USER'; \
+       SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8); \
+       NODE_PROBE_TTL=0; DASH_PORT='$DASH_PORT'; \
+       VENTUS_NODE_PROBE_TTL='${VENTUS_NODE_PROBE_TTL:-10}'; \
+       VENTUS_TELEMETRY_IDLE='${VENTUS_TELEMETRY_IDLE:-45}'; \
+       echo \$\$ > '$dir/.collector.pid'; \
+       telemetry_loop '$dir' '${WORKER:-}'" >/dev/null 2>&1 & )
+  log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s, idle after ${VENTUS_TELEMETRY_IDLE:-45}s)"
   log "dashboard: http://$(hostname):$DASH_PORT"
 }
 
