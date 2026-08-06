@@ -292,7 +292,10 @@ class Handler(BaseHTTPRequestHandler):
             # skips probing when nobody is watching. Kept in memory and served
             # over HTTP rather than written to the mount: the container runs
             # unprivileged and cannot write there, and it should not have to.
-            body = json.dumps({"idle_s": round(time.time() - _last_view[0], 1)}).encode()
+            # Capped: before the first view the raw delta is the epoch, which is
+            # correct ("very idle") but reads like a bug.
+            idle = min(time.time() - _last_view[0], 86400.0)
+            body = json.dumps({"idle_s": round(idle, 1)}).encode()
             ctype = "application/json"
             self.send_response(200)
             self.send_header("Content-Type", ctype)
