@@ -545,13 +545,19 @@ cmd_dashboard() {
   log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s)"
 
   cd "$SCRIPT_DIR"
-  # --build only when the image is missing. Rebuilding on every invocation
-  # orphans the previous layer, and those dangling images pile up unnoticed
-  # (six of them within a day of first use). Force one with --rebuild.
-  local build_flag=()
-  if [ "${DASH_REBUILD:-0}" = "1" ] \
-     || ! docker image inspect ventus/dspark-dashboard:0.1.0 >/dev/null 2>&1; then
+  # Rebuild only when it would change something: on every invocation it
+  # orphans the previous layer and those dangling images pile up unnoticed
+  # (six within a day of first use), but never rebuilding ships a stale UI
+  # after a source edit. So compare the image against the source mtimes.
+  local build_flag=() img_epoch=0 src_epoch=0
+  img_epoch="$(docker image inspect ventus/dspark-dashboard:0.1.0 \
+                 --format '{{.Created}}' 2>/dev/null | xargs -r date +%s -d 2>/dev/null || echo 0)"
+  src_epoch="$(find "$SCRIPT_DIR/dashboard" -type f -printf '%T@\n' 2>/dev/null \
+                 | sort -rn | head -1 | cut -d. -f1)"
+  if [ "${DASH_REBUILD:-0}" = "1" ] || [ "${img_epoch:-0}" -eq 0 ] \
+     || [ "${src_epoch:-0}" -gt "${img_epoch:-0}" ]; then
     build_flag=(--build)
+    log "dashboard source newer than image — rebuilding"
   fi
   DASH_PORT="$DASH_PORT" NODE_TELEMETRY_DIR="$dir" \
     docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d "${build_flag[@]}"
