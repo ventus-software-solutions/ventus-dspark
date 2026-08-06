@@ -92,6 +92,7 @@ usage() {
   echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
   echo "  --engine <lane>   025 (default, vLLM 0.25) or 021 (rollback lane)"
   echo "  --dash-port <n>   dashboard port (default 8500)"
+  echo "  --stop            (with dashboard) stop it and its telemetry collector"
 }
 
 log() { printf '\033[36m[ventus-dspark]\033[0m %s\n' "$*"; }
@@ -511,22 +512,42 @@ DASHBOARD_COMPOSE="$SCRIPT_DIR/compose/ventus-dashboard.yml"
 # a page refresh into an ssh connection.
 telemetry_loop() {
   local dir="$1" worker="$2" interval="${VENTUS_NODE_PROBE_TTL:-10}"
+  local idle_after="${VENTUS_TELEMETRY_IDLE:-45}" now watch_age
   mkdir -p "$dir"
   while :; do
-    node_probe local > "$dir/.head.tmp" 2>/dev/null && mv -f "$dir/.head.tmp" "$dir/head"
-    if [ -n "$worker" ] && [ "$worker" != "?" ]; then
-      node_probe "$worker" > "$dir/.worker.tmp" 2>/dev/null && mv -f "$dir/.worker.tmp" "$dir/worker"
-    fi
-    # Stop once the dashboard is gone. A background loop that outlives its
-    # only consumer — sshing to every node forever — is exactly the junk this
-    # is supposed to avoid.
+    # Exit check first, and before the idle gate below: an idle collector must
+    # still notice its dashboard is gone, or it spins forever with nothing to
+    # feed.
     docker ps --filter name=ventus-dspark-dashboard --format '{{.Names}}' 2>/dev/null \
-      | grep -q . || { rm -f "$dir/head" "$dir/worker" 2>/dev/null; exit 0; }
+      | grep -q . || { rm -f "$dir/head" "$dir/worker" "$dir/.watch" 2>/dev/null; exit 0; }
+
+    # Probe only while somebody is watching. The dashboard touches .watch on
+    # every /api/status, so an open browser keeps this alive and a closed one
+    # lets it fall idle within one interval. Monitoring that burns 1.5% of a
+    # core around the clock for nobody's benefit is not free monitoring.
+    now="$(date +%s)"
+    watch_age=$(( now - $(stat -c %Y "$dir/.watch" 2>/dev/null || echo 0) ))
+    if [ "$watch_age" -le "$idle_after" ]; then
+      node_probe local > "$dir/.head.tmp" 2>/dev/null && mv -f "$dir/.head.tmp" "$dir/head"
+      if [ -n "$worker" ] && [ "$worker" != "?" ]; then
+        node_probe "$worker" > "$dir/.worker.tmp" 2>/dev/null && mv -f "$dir/.worker.tmp" "$dir/worker"
+      fi
+    fi
     sleep "$interval"
   done
 }
 
 cmd_dashboard() {
+  if [ "${DASH_STOP:-0}" = "1" ]; then
+    cd "$SCRIPT_DIR"
+    docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" down >/dev/null 2>&1 || true
+    # The collector notices the container is gone on its next tick and exits
+    # on its own; kill it now so "stop" means stopped, not "stopped shortly".
+    pkill -f "ventus-telemetry-collector" 2>/dev/null || true
+    rm -rf "${VENTUS_TELEMETRY_DIR:-/tmp/ventus-telemetry}" 2>/dev/null || true
+    log "dashboard stopped, telemetry collector stopped, samples removed"
+    return 0
+  fi
   [ -f "$ENV_FILE" ] || fatal "no fleet configured — run '$0 up --worker <ip>' first"
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -581,6 +602,7 @@ while [ $# -gt 0 ]; do
     down) CMD=down ;;
     status) CMD=status ;;
     dashboard) CMD=dashboard ;;
+    --stop) DASH_STOP=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --worker) WORKER="$2"; shift ;;
     --model) MODEL="$2"; shift ;;

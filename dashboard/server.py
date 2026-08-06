@@ -285,6 +285,15 @@ class Handler(BaseHTTPRequestHandler):
             body = PAGE.encode()
             ctype = "text/html; charset=utf-8"
         elif self.path.rstrip("/").endswith("api/status"):
+            # Viewer heartbeat. The host-side collector reads this and only
+            # probes nodes while somebody is actually looking, so a dashboard
+            # nobody has open costs nothing at all.
+            if NODE_TELEMETRY_DIR:
+                try:
+                    with open(os.path.join(NODE_TELEMETRY_DIR, ".watch"), "w") as fh:
+                        fh.write(str(time.time()))
+                except OSError:
+                    pass
             body = json.dumps(collect()).encode()
             ctype = "application/json"
         else:
