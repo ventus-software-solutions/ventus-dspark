@@ -499,10 +499,49 @@ cmd_status() {
 # start, stop and crash without touching a serving fleet.
 DASHBOARD_COMPOSE="$SCRIPT_DIR/compose/ventus-dashboard.yml"
 
+# Host-side node telemetry collector.
+#
+# The dashboard container has no ssh keys and no nvidia-smi, and granting it
+# either just to read a temperature would be a poor trade. So the host — which
+# already has both — samples each node on a loop and drops key=value files the
+# container reads through a read-only mount.
+#
+# One background loop rather than a probe per HTTP request: hardware moves
+# slowly, several browsers may be watching, and nothing should be able to turn
+# a page refresh into an ssh connection.
+telemetry_loop() {
+  local dir="$1" worker="$2" interval="${VENTUS_NODE_PROBE_TTL:-10}"
+  mkdir -p "$dir"
+  while :; do
+    node_probe local > "$dir/.head.tmp" 2>/dev/null && mv -f "$dir/.head.tmp" "$dir/head"
+    if [ -n "$worker" ] && [ "$worker" != "?" ]; then
+      node_probe "$worker" > "$dir/.worker.tmp" 2>/dev/null && mv -f "$dir/.worker.tmp" "$dir/worker"
+    fi
+    sleep "$interval"
+  done
+}
+
 cmd_dashboard() {
   [ -f "$ENV_FILE" ] || fatal "no fleet configured — run '$0 up --worker <ip>' first"
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  local dir="${VENTUS_TELEMETRY_DIR:-/tmp/ventus-telemetry}"
+  [ -n "${WORKER:-}" ] || WORKER="${WORKER_HOST:-}"
+
+  # Replace any collector from a previous run so the interval and worker
+  # address always match this invocation.
+  pkill -f "ventus-telemetry-collector" 2>/dev/null || true
+  ( exec -a ventus-telemetry-collector bash -c \
+      "$(declare -f node_probe telemetry_loop); \
+       SCRIPT_DIR='$SCRIPT_DIR'; WORKER_USER='$WORKER_USER'; \
+       SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8); \
+       NODE_PROBE_TTL=0; \
+       telemetry_loop '$dir' '${WORKER:-}'" >/dev/null 2>&1 & )
+  log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s)"
+
   cd "$SCRIPT_DIR"
-  DASH_PORT="$DASH_PORT" docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d --build
+  DASH_PORT="$DASH_PORT" NODE_TELEMETRY_DIR="$dir" \
+    docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d --build
   log "dashboard: http://$(hostname):$DASH_PORT"
 }
 

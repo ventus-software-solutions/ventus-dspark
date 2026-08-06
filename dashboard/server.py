@@ -81,6 +81,49 @@ def parse_metrics(text: str) -> dict:
     return out
 
 
+NODE_TELEMETRY_DIR = os.environ.get("NODE_TELEMETRY_DIR", "")
+NODE_STALE_S = 60.0
+
+
+def nodes():
+    """Per-node hardware samples, written by the host-side collector.
+
+    The container has neither ssh keys nor nvidia-smi — handing it either so
+    it could read a temperature would be a bad trade — so the host writes
+    key=value files and this only parses them. A sample older than
+    NODE_STALE_S is reported stale rather than shown as current: silently
+    serving a five-minute-old temperature is worse than admitting the gap.
+    """
+    if not NODE_TELEMETRY_DIR or not os.path.isdir(NODE_TELEMETRY_DIR):
+        return []
+    out = []
+    now = time.time()
+    for name in sorted(os.listdir(NODE_TELEMETRY_DIR)):
+        path = os.path.join(NODE_TELEMETRY_DIR, name)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            age = now - os.path.getmtime(path)
+        except OSError:
+            continue
+        fields = {}
+        for line in lines:
+            key, sep, value = line.partition("=")
+            if not sep:
+                continue
+            try:
+                fields[key] = float(value)
+            except ValueError:
+                fields[key] = value
+        if not fields:
+            continue
+        fields["node"] = name
+        fields["age_s"] = round(age, 1)
+        fields["stale"] = age > NODE_STALE_S
+        out.append(fields)
+    return out
+
+
 def acceptance(m: dict):
     """Draft acceptance alpha.
 
@@ -135,6 +178,7 @@ def collect() -> dict:
         "decode": _rate("vllm:generation_tokens_total", "gen", m, now),
         "prefill": _rate("vllm:prompt_tokens_total", "prompt", m, now),
         "alpha": acceptance(m),
+        "nodes": nodes(),
         "at": now,
     }
     _cache.update(at=now, data=data)
