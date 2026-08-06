@@ -1,6 +1,40 @@
 # Experiment backlog — speculative decoding (2026-08-04/05)
 
-## Status of the first A/B attempt (2026-08-05 evening, paused)
+## RESULT (2026-08-06): k=7 + block verification adopted
+
+Ran with a fixed quality gate (3 samples/probe, endpoint verified quiet via
+`num_requests_running`, gating only on probes that are self-stable at
+baseline — one prose prompt sits on a floating-point near-tie and yields 3
+different answers to identical requests at ANY config; it is reported, never
+gated).
+
+| config | quality | p8192c1 stream | c6 aggregate |
+|---|---|---|---|
+| k5 (was) | — | 67.0 | 194.3 |
+| **k7 + block** | 5/5 stable probes identical | **72.9 (+8.8%)** | 183.5 (-5.6%) |
+| k7 + block + batch schedule | 5/5 identical | 64-65 (-3%) | 210.3 (+8.2%) |
+
+Adopted **k7 + block**, no schedule: our workload is 1-2 streams with long
+prompts, which is exactly where it wins. The +8.8% matches the mechanism
+prediction (accepted tokens/round 5x0.696=3.48 -> 7x0.547=3.83, +10%), so
+the number is trustworthy rather than lucky. Note acceptance RATE drops
+(0.70 -> 0.55) by design at higher k — the metric that matters is accepted
+tokens per round.
+
+Two things worth knowing:
+
+- **The batch->k schedule reproducibly costs single-stream** (~-4% at
+  p8192c1) even though at c1 it should select k=7 anyway. Unexplained;
+  worth investigating if we ever need its concurrency win (+8.2% at c6,
+  +12% mean concurrent aggregate). It is the right config for a
+  many-concurrent-sessions future, not for today's.
+- **Boot-to-boot variance dwarfs in-boot variance.** Repeat cells on one
+  boot agree within ~2%; the same cell across boots swung 51.6 vs 67-72.
+  Always re-measure the baseline in the same session as the experiment, and
+  distrust any cell that is internally impossible (shorter prompt slower
+  than a longer one).
+
+## Status of the first A/B attempt (2026-08-05 evening, superseded by the above)
 
 Run with `VENTUS_K=7` +
 `VENTUS_SPEC_EXTRA=',"rejection_sample_method":"block","num_speculative_tokens_per_batch_size":[[1,2,7],[3,8,5]]'`.

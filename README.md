@@ -18,7 +18,7 @@ worker first, waits for health, and prints your endpoint:
 
 ```
 [ventus-dspark] IB: rocep1s0f1 gid=3 eth=enp1s0f1np1
-[ventus-dspark] dspark k=5 context=1048576 (from checkpoint config)
+[ventus-dspark] dspark block=5 k=7 context=1048576
 [ventus-dspark] serving: http://head-node:8000 — model /models/v4-flash-0731
 ```
 
@@ -35,13 +35,15 @@ worker first, waits for health, and prints your endpoint:
 - **Auto-probes the IB HCA/GID.** Many Sparks have a second IB port with no
   usable RoCEv2 GID; NCCL round-robins into it and dies with a cryptic
   `ibv_modify_qp` error. The launcher picks the live port on both nodes.
-- **Validates k from the checkpoint.** The model card says
-  `num_speculative_tokens: 7`; the real `dspark_block_size` is 5, and k=7
-  crashes on first generation. The launcher reads the checkpoint and refuses
-  bad values with a clear message.
-- **Ships the validated profile.** k=5, gmu 0.78 (0.80 dies on the first real
-  request), 6 sequences, 8192 batched tokens, NVFP4 KV, B12X MoE, FlashInfer
-  sampler — every knob that turned a booting model into a fast one.
+- **Validates the drafter geometry per lane.** The checkpoint's
+  `dspark_block_size` is 5; the 0.21 engine crashes above it, the 0.25 engine
+  extends the block in the same pass. The launcher reads the checkpoint and
+  picks the right k for the lane (`VENTUS_K` overrides).
+- **Ships the validated profile.** k=7 with block verification on the 025
+  lane (+8.8% decode, byte-identical greedy output — see
+  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)), gmu 0.78 (0.80 wedged a worker
+  after 20 h), 6 sequences, 8192 batched tokens, NVFP4 KV, B12X MoE,
+  FlashInfer sampler — every knob that turned a booting model into a fast one.
 - **Both APIs.** OpenAI-compatible (`/v1/chat/completions`, AIDE/Codex) and
   Anthropic-compatible (`/v1/messages`, Claude Code), tool calling and
   reasoning content included.
@@ -51,16 +53,20 @@ worker first, waits for health, and prints your endpoint:
   so the overlay translates it; without that, Claude Code asks for extended
   thinking and silently gets none. See [Reasoning effort](#reasoning-effort).
 
-## Measured on a 2× DGX Spark fleet (2026-07-31)
+## Measured on a 2× DGX Spark fleet (2026-08-06)
 
 | metric | value |
 |---|---|
 | context window | 1,048,576 (1M), KV pool 1,691,551 tokens (0.25 engine) |
 | prefill | ~1,750–1,990 tok/s single-stream |
-| decode | 72–81 tok/s single-stream; ~194 tok/s aggregate at 6 streams |
-| draft acceptance | ~0.56 real code, ~0.70–0.88 predictable text — decode tracks this |
+| decode | ~73 tok/s single-stream at 8K prompts (k=7 + block verification, +8.8% over k=5); ~184 tok/s aggregate at 6 streams |
+| draft acceptance | ~0.55 at k=7 — a per-draft-token rate, so it falls as k rises; accepted tokens *per round* is what tracks decode speed |
 | boot | ~12–15 min cold, ~5 min warm (cached autotune) |
 | APIs | health 200, tool calls, reasoning content, math, 1M `/v1/models` |
+
+Decode speed is dominated by draft acceptance, which is workload-dependent
+(free prose accepts least, repetitive text most). Quote the number for your
+workload, not the peak.
 
 Full methodology and config: [docs/VALIDATION.md](docs/VALIDATION.md).
 
@@ -109,6 +115,19 @@ pip install pytest pydantic && python -m pytest tests/ -q
 
 Overlay unit tests are pure pydantic — no GPU, no cluster, no image.
 
+Before and after any serving-config change, gate on output equivalence:
+
+```bash
+./scripts/quality-probe.py --base-url http://HEAD:8000/v1 --out before.json
+./scripts/quality-probe.py --base-url http://HEAD:8000/v1 --diff before.json
+```
+
+It samples each probe several times, refuses to run while other clients are
+using the endpoint (co-batching legally perturbs greedy output), and gates
+only on probes that proved self-stable at baseline — one prose prompt sits
+on a floating-point near-tie and returns three different answers to
+identical requests at any config, so it is reported rather than failed.
+
 ## Building the image yourself
 
 No compiled code of our own — the image is a pinned public base plus a pure
@@ -130,6 +149,7 @@ ventus-dspark               the one command (up/down, --dry-run)
 compose/ventus-dspark.yml   compose service (worker/head roles)
 scripts/build.sh            reproducible image build
 scripts/benchmark.py        prefill/decode/acceptance sweep (stdlib only)
+scripts/quality-probe.py    output-equivalence gate for config changes
 docker/                     vendored overlay + stage Dockerfiles (MIT)
 tests/                      overlay unit tests (no GPU required)
 docs/VALIDATION.md          measured numbers + methodology
