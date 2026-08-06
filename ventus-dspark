@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# ventus-dspark â€” one command to serve DeepSeek-V4-Flash-0731 on 2x DGX Spark.
+# ventus-dspark — one command to serve DeepSeek-V4-Flash-0731 on 2x DGX Spark.
 #
 #   ./ventus-dspark up --worker <worker-ip> --model <weights-dir> [--port 8000]
 #   ./ventus-dspark down
 #
 # Run on the HEAD node. Everything else is automatic:
-#   - IB HCA/GID probe (picks the port with a usable RoCEv2 GID â€” the second
+#   - IB HCA/GID probe (picks the port with a usable RoCEv2 GID — the second
 #     port on many Sparks has none and kills NCCL silently),
 #   - dspark_block_size (k) validation (the model card says 7, the checkpoint
-#     says 5 â€” k=7 crashes on first generation),
+#     says 5 — k=7 crashes on first generation),
 #   - worker-first launch, health wait, minimal smoke request.
 #
-# The runtime image defaults to ventus/dspark-vllm:0731-0.1.0 â€” build it with
+# The runtime image defaults to ventus/dspark-vllm:0731-0.1.0 — build it with
 # scripts/build.sh or point --image at your own build. No .env editing.
 set -euo pipefail
 
@@ -20,10 +20,10 @@ ENV_DIR="$SCRIPT_DIR/.ventus"
 ENV_FILE="$ENV_DIR/env.dspark"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
-# Engine lane: 025 (default, Anemll vLLM 0.25 port â€” +8% decode, +15% KV
+# Engine lane: 025 (default, Anemll vLLM 0.25 port — +8% decode, +15% KV
 # pool vs 021, see docs/VALIDATION.md) or 021 (bjk110 base, kept for
 # rollback). Each lane has its own compose file and image; they are not
-# mix-and-match â€” overlay files from one vLLM version crash the other.
+# mix-and-match — overlay files from one vLLM version crash the other.
 ENGINE="${VENTUS_ENGINE:-025}"
 IMAGE="${VENTUS_IMAGE:-}"
 VLLM_PORT=8000
@@ -32,13 +32,14 @@ MASTER_PORT=25000
 # that into a crash before the first line of output.
 WORKER_USER="${VENTUS_WORKER_USER:-${USER:-$(id -un)}}"
 DRY_RUN=0
+DASH_PORT="${VENTUS_DASH_PORT:-8500}"
 # Optional speculative-config additions, e.g. (see docs/EXPERIMENTS.md):
 #   VENTUS_SPEC_EXTRA=',"rejection_sample_method":"block"'
 # Block verification (Sun et al. 2403.10444) is lossless and measured
 # non-negative; it only engages at temperature > 0. Override to '' to drop it.
 VENTUS_SPEC_EXTRA="${VENTUS_SPEC_EXTRA-,\"rejection_sample_method\":\"block\"}"
 
-# Validated engine constants â€” changing any of these without re-measuring on
+# Validated engine constants — changing any of these without re-measuring on
 # the same hardware is how you lose the numbers in docs/VALIDATION.md.
 GPU_MEMORY_UTILIZATION="${VENTUS_GMU:-}"
 MAX_NUM_SEQS="${VENTUS_SEQS:-6}"
@@ -66,7 +67,7 @@ resolve_engine() {
       COMPOSE="$SCRIPT_DIR/compose/ventus-dspark-025.yml"
       [ -n "$IMAGE" ] || IMAGE="ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0"
       # 0.78, not Anemll's 0.80: the worker accumulated NVRM out-of-memory
-      # kernel checks over 20h at 0.80 and hard-hung (2026-08-05) â€” the same
+      # kernel checks over 20h at 0.80 and hard-hung (2026-08-05) — the same
       # margin lesson VALIDATION.md already recorded for the 021 lane.
       [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.78
       ;;
@@ -80,6 +81,8 @@ usage() {
   echo "Commands:"
   echo "  up      start serving (add --dry-run to print config without starting)"
   echo "  down    stop serving on both nodes"
+  echo "  status  show fleet health, model, KV pool, decode + draft acceptance"
+  echo "  dashboard  serve the same view as a web page (default :8500)"
   echo
   echo "Options (up):"
   echo "  --worker <ip>     worker node fabric IP (required)"
@@ -88,6 +91,7 @@ usage() {
   echo "  --image <tag>     runtime image (default depends on --engine)"
   echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
   echo "  --engine <lane>   025 (default, vLLM 0.25) or 021 (rollback lane)"
+  echo "  --dash-port <n>   dashboard port (default 8500)"
 }
 
 log() { printf '\033[36m[ventus-dspark]\033[0m %s\n' "$*"; }
@@ -99,7 +103,7 @@ probe_ib() {
   # Pick the IB device+port whose RoCEv2 GID is usable. A link-local (fe80)
   # GID at the selected index or an all-zeros one means no RoCEv2 on that
   # port. The working IPv4-mapped GID looks like
-  # 0000:0000:0000:0000:0000:ffff:c0a8:0102 â€” leading zeros are normal.
+  # 0000:0000:0000:0000:0000:ffff:c0a8:0102 — leading zeros are normal.
   local host="$1" out dev port idx gid
   if [ "$host" = "local" ]; then
     out="$(for d in /sys/class/infiniband/*/; do
@@ -120,7 +124,7 @@ probe_ib() {
   else
     out="$(run_worker 'for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 3 2 1; do [ -r "$p"gids/$idx ] || continue; IFS= read -r gid < "$p"gids/$idx || true; case "$gid" in ""|fe80:*) continue ;; 0000:0000:0000:0000:0000:0000:0000:0000) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1')"
   fi
-  [ -n "$out" ] || fatal "no usable RoCEv2 GID found on $host â€” check the IB fabric"
+  [ -n "$out" ] || fatal "no usable RoCEv2 GID found on $host — check the IB fabric"
   echo "$out"
 }
 
@@ -145,7 +149,7 @@ PY
 gen_env() {
   mkdir -p "$ENV_DIR"
   cat > "$ENV_FILE" <<EOF
-# Generated by ventus-dspark $(date -Is) â€” do not hand-edit.
+# Generated by ventus-dspark $(date -Is) — do not hand-edit.
 WORKER_HOST=$WORKER
 MASTER_ADDR=$HEAD_IP
 MASTER_PORT=$MASTER_PORT
@@ -217,7 +221,7 @@ EOF
 cmd_up() {
   [ -n "$WORKER" ] || { usage; fatal "--worker is required"; }
   if [ ! -f "$MODEL/config.json" ]; then
-    log "no weights at $MODEL â€” to fetch them (resumable, ~155 GB for 0731):"
+    log "no weights at $MODEL — to fetch them (resumable, ~155 GB for 0731):"
     log "  ./scripts/fetch-weights.sh --dir $MODEL"
     log "then copy to the worker over the fabric link:"
     log "  rsync -a --partial --info=progress2 $MODEL/ $WORKER:$MODEL/"
@@ -226,7 +230,7 @@ cmd_up() {
   command -v docker >/dev/null || fatal "docker not found on head"
   run_worker "command -v docker >/dev/null" || fatal "docker not found on worker ($WORKER)"
   if ! run_worker "[ -f '$MODEL/config.json' ]"; then
-    log "weights missing on the worker â€” copy them over the fabric link:"
+    log "weights missing on the worker — copy them over the fabric link:"
     log "  rsync -a --partial --info=progress2 $MODEL/ $WORKER:$MODEL/"
     fatal "weights missing on the worker ($WORKER)"
   fi
@@ -238,7 +242,7 @@ cmd_up() {
   local local_ib worker_ib
   local_ib="$(probe_ib local)"
   worker_ib="$(probe_ib worker)"
-  [ "${local_ib%%:*}" = "${worker_ib%%:*}" ] || fatal "head HCA ${local_ib%%:*} != worker HCA ${worker_ib%%:*} â€” check the fabric"
+  [ "${local_ib%%:*}" = "${worker_ib%%:*}" ] || fatal "head HCA ${local_ib%%:*} != worker HCA ${worker_ib%%:*} — check the fabric"
   NCCL_IB_HCA="${local_ib%%:*}"
   NCCL_IB_GID_INDEX="${local_ib##*:}"
   NCCL_SOCKET_IFNAME="$(ip route get "$WORKER" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
@@ -259,7 +263,7 @@ cmd_up() {
     # The 0.21 engine crashes on k>5 ("size of tensor a (7) must match b (5)").
     [ "$MTP_NUM_TOKENS" -le 5 ] || fatal "k=$MTP_NUM_TOKENS unsupported on the 021 lane (crashes >5)"
   else
-    # 0.25+: any k >= block is legal â€” the drafter extends its block in the
+    # 0.25+: any k >= block is legal — the drafter extends its block in the
     # same parallel pass. k < block is rejected by the engine itself.
     [ "$MTP_NUM_TOKENS" -ge "$BLOCK_K" ] || fatal "k=$MTP_NUM_TOKENS < drafter block $BLOCK_K"
   fi
@@ -284,7 +288,7 @@ cmd_up() {
   scp "${SSH_OPTS[@]}" "$COMPOSE" "${WORKER_USER}@$WORKER:~/.ventus-dspark/ventus-dspark.yml"
   scp "${SSH_OPTS[@]}" "$ENV_FILE" "${WORKER_USER}@$WORKER:~/.ventus-dspark/env.dspark"
   # --force-recreate: a TP rank from a previous NCCL world must never be
-  # reused â€” compose sees "same config, already running" and keeps a zombie
+  # reused — compose sees "same config, already running" and keeps a zombie
   # whose TCPStore is dead, and the new head waits on it forever (lived
   # 2026-08-04 during the first fleet-boot drill).
   run_worker "cd ~/.ventus-dspark && NODE_RANK=1 HEADLESS=1 VLLM_HOST_IP=$WORKER docker compose --env-file env.dspark -f ventus-dspark.yml up -d --force-recreate"
@@ -296,15 +300,132 @@ cmd_up() {
   log "waiting for API on :$VLLM_PORT (cold boot ~15 min)..."
   local i=0
   until curl -fsS --max-time 5 "http://127.0.0.1:$VLLM_PORT/health" >/dev/null 2>&1; do
-    i=$((i+1)); [ "$i" -gt 100 ] && fatal "API did not come up in 25 min â€” see 'docker compose logs'"
+    i=$((i+1)); [ "$i" -gt 100 ] && fatal "API did not come up in 25 min — see 'docker compose logs'"
     sleep 15
   done
-  log "serving: http://$(hostname):$VLLM_PORT â€” model /models/$(basename "$MODEL")"
+  log "serving: http://$(hostname):$VLLM_PORT — model /models/$(basename "$MODEL")"
+}
+
+# --- status -----------------------------------------------------------------
+#
+# Reads the generated env file rather than re-probing, so `status` reports the
+# fleet as it was actually launched — re-probing could report a healthy IB port
+# that the running server is not using.
+#
+# Draft acceptance is printed next to decode on purpose. Decode speed on this
+# hardware tracks acceptance almost linearly (~20 + 65*alpha, docs/VALIDATION.md),
+# so a tok/s number without its alpha is not interpretable: a slow run usually
+# means an unpredictable prompt, not a broken fleet.
+
+# Pull one Prometheus sample out of $METRICS. Handles both bare names and
+# label sets: `vllm:num_requests_running{model_name="..."} 2.0`.
+metric() {
+  printf '%s\n' "$METRICS" | awk -v k="$1" '
+    index($0, k) == 1 && (substr($0, length(k)+1, 1) ~ /[{ ]/) { v = $NF }
+    END { if (v != "") print v }'
+}
+
+# Trim trailing zeros so 0.580000 prints as 0.58.
+fmt() { LC_ALL=C printf '%.*f' "${2:-2}" "$1" 2>/dev/null || printf '%s' "$1"; }
+
+cmd_status() {
+  [ -f "$ENV_FILE" ] || fatal "no fleet configured — run '$0 up --worker <ip>' first"
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+
+  local port="${VLLM_PORT:-8000}" worker="${WORKER_HOST:-?}"
+  local base="http://127.0.0.1:$port"
+
+  # --- head ---
+  local head_state="down"
+  curl -fsS --max-time 5 "$base/health" >/dev/null 2>&1 && head_state="up"
+
+  # --- worker --- reachable over ssh AND running a container. A worker that
+  # answers ssh but has no container is the failure this line exists to catch.
+  local worker_state="unreachable"
+  if [ "$worker" != "?" ]; then
+    if run_worker "docker ps --filter name=dspark --format '{{.State}}' | head -1" 2>/dev/null | grep -q running; then
+      worker_state="up"
+    elif run_worker true 2>/dev/null; then
+      worker_state="ssh ok, no container"
+    fi
+  fi
+
+  printf '\n  \033[1mventus-dspark\033[0m — fleet status\n\n'
+  printf '  %-12s head %s   worker %s (%s)\n' "nodes" \
+    "$([ "$head_state" = up ] && echo ✓ || echo ✗)" \
+    "$([ "$worker_state" = up ] && echo ✓ || echo ✗)" "$worker"
+  printf '  %-12s %s  gid=%s  %s\n' "IB" \
+    "${NCCL_IB_HCA:-?}" "${NCCL_IB_GID_INDEX:-?}" \
+    "$([ -n "${NCCL_IB_HCA:-}" ] && echo "RoCEv2" || echo "not probed")"
+
+  if [ "$head_state" != up ]; then
+    printf '  %-12s API not answering on :%s — try: docker compose logs\n\n' "" "$port"
+    [ "$worker_state" = up ] || printf '  %-12s worker: %s\n\n' "" "$worker_state"
+    return 1
+  fi
+
+  METRICS="$(curl -fsS --max-time 5 "$base/metrics" 2>/dev/null || true)"
+
+  local model ctx
+  model="$(curl -fsS --max-time 5 "$base/v1/models" 2>/dev/null \
+    | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  ctx="${MAX_MODEL_LEN:-}"
+  printf '  %-12s %s   ctx %s\n' "model" "${model:-?}" \
+    "$(LC_ALL=C printf "%'d" "${ctx:-0}" 2>/dev/null || echo "${ctx:-?}")"
+
+  # KV pool. vLLM exposes a 0..1 fraction; the absolute pool size is only in
+  # the boot log, so report the percentage and let the operator size from it.
+  local kv; kv="$(metric 'vllm:gpu_cache_usage_perc')"
+  [ -n "$kv" ] && printf '  %-12s %s%% used\n' "KV pool" "$(fmt "$(echo "$kv 100" | awk '{print $1*$2}')" 1)"
+
+  local run wait_; run="$(metric 'vllm:num_requests_running')"; wait_="$(metric 'vllm:num_requests_waiting')"
+  [ -n "$run" ] && printf '  %-12s %s running, %s queued (max %s)\n' "streams" \
+    "$(fmt "${run:-0}" 0)" "$(fmt "${wait_:-0}" 0)" "${MAX_NUM_SEQS:-?}"
+
+  # Acceptance: prefer the gauge, fall back to the counters. Metric names have
+  # moved between vLLM releases and both lanes are supported, so try each.
+  local alpha acc draft
+  alpha="$(metric 'vllm:spec_decode_draft_acceptance_rate')"
+  if [ -z "$alpha" ]; then
+    acc="$(metric 'vllm:spec_decode_num_accepted_tokens_total')"
+    draft="$(metric 'vllm:spec_decode_num_draft_tokens_total')"
+    if [ -n "$acc" ] && [ -n "$draft" ]; then
+      alpha="$(awk -v a="$acc" -v d="$draft" 'BEGIN{ if (d+0 > 0) print a/d }')"
+    fi
+  fi
+
+  local tps; tps="$(metric 'vllm:avg_generation_throughput_toks_per_s')"
+  if [ -n "$tps" ] || [ -n "$alpha" ]; then
+    printf '  %-12s %s tok/s' "decode" "${tps:+$(fmt "$tps" 1)}${tps:-–}"
+    [ -n "$alpha" ] && printf '     \033[36m← α %s\033[0m' "$(fmt "$alpha")"
+    printf '\n'
+  fi
+  [ -n "$alpha" ] && awk -v a="$alpha" 'BEGIN{
+    if (a+0 < 0.45) print "  " sprintf("%-12s","") "low α — unpredictable prompts, not a fleet fault"
+  }'
+
+  printf '\n'
+}
+
+# --- dashboard --------------------------------------------------------------
+#
+# Optional, and deliberately in its own compose file: it has to be able to
+# start, stop and crash without touching a serving fleet.
+DASHBOARD_COMPOSE="$SCRIPT_DIR/compose/ventus-dashboard.yml"
+
+cmd_dashboard() {
+  [ -f "$ENV_FILE" ] || fatal "no fleet configured — run '$0 up --worker <ip>' first"
+  cd "$SCRIPT_DIR"
+  DASH_PORT="$DASH_PORT" docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d --build
+  log "dashboard: http://$(hostname):$DASH_PORT"
 }
 
 cmd_down() {
   [ -n "$WORKER" ] || { usage; fatal "--worker is required"; }
   cd "$SCRIPT_DIR"
+  # Best-effort: the dashboard may never have been started.
+  DASH_PORT="$DASH_PORT" docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" down 2>/dev/null || true
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" down 2>/dev/null || true
   run_worker "cd ~/.ventus-dspark && docker compose --env-file env.dspark -f ventus-dspark.yml down" 2>/dev/null || true
   log "stopped on both nodes"
@@ -315,10 +436,13 @@ while [ $# -gt 0 ]; do
   case "$1" in
     up) CMD=up ;;
     down) CMD=down ;;
+    status) CMD=status ;;
+    dashboard) CMD=dashboard ;;
     --dry-run) DRY_RUN=1 ;;
     --worker) WORKER="$2"; shift ;;
     --model) MODEL="$2"; shift ;;
     --port) VLLM_PORT="$2"; shift ;;
+    --dash-port) DASH_PORT="$2"; shift ;;
     --image) IMAGE="$2"; shift ;;
     --thinking)
       case "$2" in
@@ -336,5 +460,7 @@ resolve_engine
 case "${CMD:-}" in
   up) cmd_up ;;
   down) cmd_down ;;
-  *) usage; fatal "command required: up | down" ;;
+  status) cmd_status ;;
+  dashboard) cmd_dashboard ;;
+  *) usage; fatal "command required: up | down | status | dashboard" ;;
 esac

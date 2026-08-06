@@ -84,6 +84,39 @@ for real source text; the gap between the two corpora is how much DSpark
 acceptance the filler was inflating. Draft acceptance is read from
 `/metrics` per case, because acceptance is what explains a decode number.
 
+## Fleet status
+
+```bash
+./ventus-dspark status
+```
+
+```
+  ventus-dspark — fleet status
+
+  nodes        head ✓   worker ✓ (192.168.1.2)
+  IB           rocep1s0f1  gid=3  RoCEv2
+  model        /models/v4-flash-0731   ctx 1,048,576
+  KV pool      24.4% used
+  streams      2 running, 0 queued (max 6)
+  decode       71.4 tok/s     ← α 0.58
+```
+
+Acceptance is printed next to decode on purpose. Decode tracks α almost
+linearly on this hardware (~`20 + 65·α`), so a tok/s number without its α is
+not interpretable — a slow reading usually means an unpredictable prompt, not
+a broken fleet.
+
+The same view as a web page, if you want it on a wall:
+
+```bash
+./ventus-dspark dashboard          # http://<head>:8500
+```
+
+One small container, stdlib Python, no Prometheus and no Grafana — it polls
+the API server-side and refreshes every five seconds. It lives in its own
+compose file so it can start, stop or crash without touching a serving fleet.
+`down` stops it along with everything else.
+
 ## Reasoning effort
 
 The 0731 checkpoint has no Jinja `chat_template`. `--tokenizer-mode

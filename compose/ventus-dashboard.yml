@@ -1,0 +1,29 @@
+# Fleet dashboard. Separate from the inference compose files on purpose: it
+# must be able to start, stop and crash without touching a serving fleet, and
+# it is the one component here that is genuinely optional.
+#
+# network_mode: host so it can reach the API on 127.0.0.1 without publishing
+# the inference port anywhere new.
+
+services:
+  dashboard:
+    build:
+      context: ../dashboard
+    image: ventus/dspark-dashboard:0.1.0
+    container_name: ventus-dspark-dashboard
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      VLLM_URL: "http://127.0.0.1:${VLLM_PORT:-8000}"
+      DASH_PORT: "${DASH_PORT:-8500}"
+      # Display-only, straight from the generated env file.
+      WORKER_HOST: "${WORKER_HOST:-}"
+      NCCL_IB_HCA: "${NCCL_IB_HCA:-}"
+      NCCL_IB_GID_INDEX: "${NCCL_IB_GID_INDEX:-}"
+      MAX_NUM_SEQS: "${MAX_NUM_SEQS:-}"
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request,os,sys; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('DASH_PORT','8500')+'/api/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
