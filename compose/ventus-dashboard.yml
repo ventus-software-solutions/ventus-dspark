@@ -28,8 +28,11 @@ services:
       # read a temperature would be a poor trade — so it reads files instead.
       - "${NODE_TELEMETRY_DIR:-/tmp/ventus-telemetry}:/telemetry:ro"
     healthcheck:
+      # /api/idle, not /api/status: the status endpoint records a viewer, so
+      # healthchecking it kept the dashboard permanently "watched" and the
+      # collector never went idle — the healthcheck was the only viewer.
       test: ["CMD", "python3", "-c",
-             "import urllib.request,os,sys; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('DASH_PORT','8500')+'/api/status', timeout=5)"]
+             "import urllib.request,os,sys; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('DASH_PORT','8500')+'/api/idle', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
