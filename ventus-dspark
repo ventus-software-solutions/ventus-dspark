@@ -317,6 +317,70 @@ cmd_up() {
 # so a tok/s number without its alpha is not interpretable: a slow run usually
 # means an unpredictable prompt, not a broken fleet.
 
+# Hardware telemetry for one node. `local` runs here; anything else is a
+# worker reached over ssh with the probe on stdin, so nothing has to be copied
+# to the node first.
+#
+# Results are cached for NODE_PROBE_TTL seconds (default 10). Hardware state
+# moves slowly and an ssh round trip is ~300 ms per node, so a dashboard
+# polling every couple of seconds must not open an ssh connection every time.
+NODE_PROBE_TTL="${VENTUS_NODE_PROBE_TTL:-10}"
+node_probe() {
+  local node="$1" cache age now
+  cache="${TMPDIR:-/tmp}/.ventus-node-${node//[^A-Za-z0-9]/_}"
+  now="$(date +%s)"
+  if [ -s "$cache" ]; then
+    age=$(( now - $(awk 'NR==1{print $1}' "$cache" 2>/dev/null || echo 0) ))
+    if [ "$age" -ge 0 ] && [ "$age" -lt "$NODE_PROBE_TTL" ]; then
+      tail -n +2 "$cache"
+      return 0
+    fi
+  fi
+  local out
+  if [ "$node" = "local" ]; then
+    out="$(bash "$SCRIPT_DIR/scripts/node-probe.sh" 2>/dev/null)"
+  else
+    out="$(ssh "${SSH_OPTS[@]}" "${WORKER_USER}@$node" "bash -s" \
+           < "$SCRIPT_DIR/scripts/node-probe.sh" 2>/dev/null)"
+  fi
+  # Only refresh the cache on a real answer: a transient ssh failure should
+  # not blank a node that was healthy a second ago.
+  if [ -n "$out" ]; then
+    { printf '%s\n' "$now"; printf '%s\n' "$out"; } > "$cache" 2>/dev/null
+    printf '%s\n' "$out"
+  elif [ -s "$cache" ]; then
+    tail -n +2 "$cache"
+  fi
+}
+
+# One node row: hardware only. The lines above answer "is the fleet serving";
+# this answers "is the box healthy" — the question that goes unasked until a
+# node wedges (lived 2026-08-05).
+node_row() {
+  local label="$1" probe="$2"
+  [ -n "$probe" ] || { printf '  %-12s %s\n' "$label" "unreachable"; return 0; }
+  local temp util mem load disk nvrm up
+  temp="$(printf '%s\n' "$probe" | awk -F= '$1=="gpu_temp_c"{print $2}')"
+  util="$(printf '%s\n' "$probe" | awk -F= '$1=="gpu_util_pct"{print $2}')"
+  mem="$(printf '%s\n' "$probe" | awk -F= '$1=="mem_used_pct"{print $2}')"
+  load="$(printf '%s\n' "$probe" | awk -F= '$1=="load1"{print $2}')"
+  disk="$(printf '%s\n' "$probe" | awk -F= '$1=="disk_used_pct"{print $2}')"
+  nvrm="$(printf '%s\n' "$probe" | awk -F= '$1=="nvrm_oom"{print $2}')"
+  up="$(printf '%s\n' "$probe" | awk -F= '$1=="uptime_h"{print $2}')"
+
+  # Thresholds that matter on GB10: unified memory is the wedge risk and the
+  # NVRM allocation failures are its early symptom.
+  local red=$'\033[31m' off=$'\033[0m' memc="" tempc="" warn=""
+  awk -v m="${mem:-0}" 'BEGIN{ exit !(m+0 > 92) }' && { memc="$red"; warn="mem"; }
+  awk -v t="${temp:-0}" 'BEGIN{ exit !(t+0 > 85) }' && { tempc="$red"; warn="${warn:+$warn, }temp"; }
+
+  printf '  %-12s %s%s°C%s  gpu %s%%  mem %s%s%%%s  load %s  disk %s%%  up %sh  nvrm %s\n' \
+    "$label" "$tempc" "${temp:-?}" "$off" "${util:-?}" \
+    "$memc" "${mem:-?}" "$off" "${load:-?}" "${disk:-?}" "${up:-?}" "${nvrm:-?}"
+  [ -n "$warn" ] && printf '  %-12s %s^ %s over threshold%s\n' "" "$red" "$warn" "$off"
+  return 0
+}
+
 # Pull one Prometheus sample out of $METRICS. Handles both bare names and
 # label sets: `vllm:num_requests_running{model_name="..."} 2.0`.
 metric() {
@@ -421,6 +485,10 @@ cmd_status() {
   [ -n "$alpha" ] && awk -v a="$alpha" 'BEGIN{
     if (a+0 < 0.45) print "  " sprintf("%-12s","") "low α — unpredictable prompts, not a fleet fault"
   }'
+
+  printf '\n'
+  node_row "head" "$(node_probe local)"
+  [ "$worker" != "?" ] && node_row "worker" "$(node_probe "$worker")"
 
   printf '\n'
 }
