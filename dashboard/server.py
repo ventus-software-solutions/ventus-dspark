@@ -207,6 +207,7 @@ PAGE = """<!doctype html><meta charset=utf-8>
 <main>
  <h1>ventus-dspark — fleet</h1>
  <div class=grid id=g></div>
+ <div class=grid id=n style="margin-top:12px"></div>
  <footer id=f>connecting…</footer>
 </main>
 <script>
@@ -244,6 +245,30 @@ async function tick() {
     tile('decode', d.decode == null ? '–' : num(d.decode,1) + ' tok/s',
          a == null ? 'no acceptance metric' : `α ${a.toFixed(2)}`, aCls),
   ].join('');
+
+  // Per-node hardware. Rendered as its own row because it answers a different
+  // question from the fleet tiles above: not "is it serving" but "is the box
+  // healthy" — the question nobody asks until a node wedges.
+  const nodes = d.nodes || [];
+  document.getElementById('n').innerHTML = nodes.length === 0 ? '' : nodes.map(n => {
+    const memCls  = n.mem_used_pct > 92 ? 'bad' : n.mem_used_pct > 85 ? 'warn' : 'ok';
+    const tempCls = n.gpu_temp_c  > 85 ? 'bad' : n.gpu_temp_c  > 75 ? 'warn' : 'ok';
+    // A stale sample is dimmed rather than hidden: an unreachable node is
+    // itself the news, and blanking it would look like a healthy idle box.
+    const stale = n.stale ? ` · <span class=bad>stale ${num(n.age_s)}s</span>` : '';
+    return `<div class="tile wide" ${n.stale ? 'style=opacity:.55' : ''}>
+      <div class="k">${n.node}${stale}</div>
+      <div class="sub" style="font-size:13px;margin-top:6px">
+        <span class="${tempCls}">${num(n.gpu_temp_c)}°C</span> &nbsp;
+        gpu ${num(n.gpu_util_pct)}% &nbsp;
+        ${num(n.gpu_power_w,1)}W &nbsp;
+        mem <span class="${memCls}">${num(n.mem_used_pct,1)}%</span>
+        <span class=dim>of ${num(n.mem_total_gib)}G</span> &nbsp;
+        load ${num(n.load1,2)} &nbsp; disk ${num(n.disk_used_pct)}% &nbsp;
+        up ${num(n.uptime_h)}h &nbsp;
+        nvrm <span class="${n.nvrm_oom > 0 ? 'warn' : 'dim'}">${num(n.nvrm_oom)}</span>
+      </div></div>`;
+  }).join('');
 
   document.getElementById('f').textContent =
     (a != null && a < 0.45 ? 'low α — unpredictable prompts, not a fleet fault · ' : '') +

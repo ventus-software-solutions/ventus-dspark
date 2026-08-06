@@ -517,6 +517,11 @@ telemetry_loop() {
     if [ -n "$worker" ] && [ "$worker" != "?" ]; then
       node_probe "$worker" > "$dir/.worker.tmp" 2>/dev/null && mv -f "$dir/.worker.tmp" "$dir/worker"
     fi
+    # Stop once the dashboard is gone. A background loop that outlives its
+    # only consumer — sshing to every node forever — is exactly the junk this
+    # is supposed to avoid.
+    docker ps --filter name=ventus-dspark-dashboard --format '{{.Names}}' 2>/dev/null \
+      | grep -q . || { rm -f "$dir/head" "$dir/worker" 2>/dev/null; exit 0; }
     sleep "$interval"
   done
 }
@@ -540,8 +545,16 @@ cmd_dashboard() {
   log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s)"
 
   cd "$SCRIPT_DIR"
+  # --build only when the image is missing. Rebuilding on every invocation
+  # orphans the previous layer, and those dangling images pile up unnoticed
+  # (six of them within a day of first use). Force one with --rebuild.
+  local build_flag=()
+  if [ "${DASH_REBUILD:-0}" = "1" ] \
+     || ! docker image inspect ventus/dspark-dashboard:0.1.0 >/dev/null 2>&1; then
+    build_flag=(--build)
+  fi
   DASH_PORT="$DASH_PORT" NODE_TELEMETRY_DIR="$dir" \
-    docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d --build
+    docker compose --env-file "$ENV_FILE" -f "$DASHBOARD_COMPOSE" up -d "${build_flag[@]}"
   log "dashboard: http://$(hostname):$DASH_PORT"
 }
 
