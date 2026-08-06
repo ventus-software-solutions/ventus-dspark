@@ -32,6 +32,25 @@ DASH_PORT = int(os.environ.get("DASH_PORT", "8500"))
 CACHE_TTL = 2.0
 
 _cache: dict = {"at": 0.0, "data": None}
+# Previous raw counter sample, for deriving rates across polls.
+_prev: dict = {"at": 0.0, "gen": None, "prompt": None}
+
+
+def _rate(name: str, key: str, m: dict, now: float):
+    """Tokens/s from a cumulative counter across two polls.
+
+    vLLM 0.25 removed avg_*_throughput_toks_per_s; the counters are
+    what remain. None until a second sample exists, and None when the
+    fleet is idle — an honest blank beats a fabricated zero.
+    """
+    cur = m.get(name)
+    prev, prev_at = _prev.get(key), _prev.get("at", 0.0)
+    _prev[key] = cur
+    _prev["at"] = now
+    if cur is None or prev is None or now <= prev_at:
+        return None
+    rate = (cur - prev) / (now - prev_at)
+    return round(rate, 1) if rate > 0.05 else None
 
 
 def _get(path: str, timeout: float = 4.0):
@@ -109,12 +128,12 @@ def collect() -> dict:
             "hca": os.environ.get("NCCL_IB_HCA"),
             "gid": os.environ.get("NCCL_IB_GID_INDEX"),
         },
-        "kv_used": m.get("vllm:gpu_cache_usage_perc"),
+        "kv_used": m.get("vllm:kv_cache_usage_perc"),
         "running": m.get("vllm:num_requests_running"),
         "waiting": m.get("vllm:num_requests_waiting"),
         "max_seqs": os.environ.get("MAX_NUM_SEQS"),
-        "decode": m.get("vllm:avg_generation_throughput_toks_per_s"),
-        "prefill": m.get("vllm:avg_prompt_throughput_toks_per_s"),
+        "decode": _rate("vllm:generation_tokens_total", "gen", m, now),
+        "prefill": _rate("vllm:prompt_tokens_total", "prompt", m, now),
         "alpha": acceptance(m),
         "at": now,
     }
