@@ -521,13 +521,18 @@ telemetry_loop() {
     docker ps --filter name=ventus-dspark-dashboard --format '{{.Names}}' 2>/dev/null \
       | grep -q . || { rm -f "$dir/head" "$dir/worker" "$dir/.watch" 2>/dev/null; exit 0; }
 
-    # Probe only while somebody is watching. The dashboard touches .watch on
-    # every /api/status, so an open browser keeps this alive and a closed one
-    # lets it fall idle within one interval. Monitoring that burns 1.5% of a
-    # core around the clock for nobody's benefit is not free monitoring.
-    now="$(date +%s)"
-    watch_age=$(( now - $(stat -c %Y "$dir/.watch" 2>/dev/null || echo 0) ))
-    if [ "$watch_age" -le "$idle_after" ]; then
+    # Probe only while somebody is watching. The dashboard tracks the last
+    # viewer request and reports it on /api/idle; an open browser keeps this
+    # sampling, a closed tab lets it fall idle within one interval. Monitoring
+    # that burns 1.5% of a core around the clock for nobody's benefit is not
+    # free monitoring.
+    #
+    # Asked over HTTP rather than through a shared file: the container runs
+    # unprivileged and cannot write to the mount, and giving it write access
+    # just to leave a timestamp would be the wrong trade.
+    watch_age="$(curl -fsS --max-time 3 "http://127.0.0.1:${DASH_PORT:-8500}/api/idle" 2>/dev/null \
+                 | sed -n 's/.*"idle_s"[: ]*\([0-9.]*\).*/\1/p' | cut -d. -f1)"
+    if [ -n "$watch_age" ] && [ "$watch_age" -le "$idle_after" ]; then
       node_probe local > "$dir/.head.tmp" 2>/dev/null && mv -f "$dir/.head.tmp" "$dir/head"
       if [ -n "$worker" ] && [ "$worker" != "?" ]; then
         node_probe "$worker" > "$dir/.worker.tmp" 2>/dev/null && mv -f "$dir/.worker.tmp" "$dir/worker"

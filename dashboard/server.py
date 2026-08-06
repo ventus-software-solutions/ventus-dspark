@@ -32,6 +32,8 @@ DASH_PORT = int(os.environ.get("DASH_PORT", "8500"))
 CACHE_TTL = 2.0
 
 _cache: dict = {"at": 0.0, "data": None}
+# Wall-clock of the last viewer request, for the idle endpoint above.
+_last_view: list = [0.0]
 # Previous raw counter sample, for deriving rates across polls.
 _prev: dict = {"at": 0.0, "gen": None, "prompt": None}
 
@@ -282,18 +284,24 @@ tick(); setInterval(tick, 5000);
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         if self.path.rstrip("/") in ("", "/index.html"):
+            _last_view[0] = time.time()
             body = PAGE.encode()
             ctype = "text/html; charset=utf-8"
+        elif self.path.rstrip("/").endswith("api/idle"):
+            # How long since a human last looked. The collector polls this and
+            # skips probing when nobody is watching. Kept in memory and served
+            # over HTTP rather than written to the mount: the container runs
+            # unprivileged and cannot write there, and it should not have to.
+            body = json.dumps({"idle_s": round(time.time() - _last_view[0], 1)}).encode()
+            ctype = "application/json"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         elif self.path.rstrip("/").endswith("api/status"):
-            # Viewer heartbeat. The host-side collector reads this and only
-            # probes nodes while somebody is actually looking, so a dashboard
-            # nobody has open costs nothing at all.
-            if NODE_TELEMETRY_DIR:
-                try:
-                    with open(os.path.join(NODE_TELEMETRY_DIR, ".watch"), "w") as fh:
-                        fh.write(str(time.time()))
-                except OSError:
-                    pass
+            _last_view[0] = time.time()
             body = json.dumps(collect()).encode()
             ctype = "application/json"
         else:
