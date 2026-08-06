@@ -566,7 +566,9 @@ cmd_dashboard() {
       "$(declare -f node_probe telemetry_loop); \
        SCRIPT_DIR='$SCRIPT_DIR'; WORKER_USER='$WORKER_USER'; \
        SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8); \
-       NODE_PROBE_TTL=0; \
+       NODE_PROBE_TTL=0; DASH_PORT='$DASH_PORT'; \
+       VENTUS_NODE_PROBE_TTL='${VENTUS_NODE_PROBE_TTL:-10}'; \
+       VENTUS_TELEMETRY_IDLE='${VENTUS_TELEMETRY_IDLE:-45}'; \
        telemetry_loop '$dir' '${WORKER:-}'" >/dev/null 2>&1 & )
   log "telemetry collector -> $dir (every ${VENTUS_NODE_PROBE_TTL:-10}s)"
 
