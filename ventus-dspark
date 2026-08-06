@@ -334,6 +334,10 @@ cmd_status() {
   set -a; . "$ENV_FILE"; set +a
 
   local port="${VLLM_PORT:-8000}" worker="${WORKER_HOST:-?}"
+  # run_worker() ssh's to the global $WORKER; without --worker on the command
+  # line that is empty and every worker probe silently fails. The generated env
+  # is the authority here — status must describe the fleet as launched.
+  [ -n "${WORKER:-}" ] || WORKER="$worker"
   local base="http://127.0.0.1:$port"
 
   # --- head ---
@@ -376,7 +380,7 @@ cmd_status() {
 
   # KV pool. vLLM exposes a 0..1 fraction; the absolute pool size is only in
   # the boot log, so report the percentage and let the operator size from it.
-  local kv; kv="$(metric 'vllm:gpu_cache_usage_perc')"
+  local kv; kv="$(metric 'vllm:kv_cache_usage_perc')"
   [ -n "$kv" ] && printf '  %-12s %s%% used\n' "KV pool" "$(fmt "$(echo "$kv 100" | awk '{print $1*$2}')" 1)"
 
   local run wait_; run="$(metric 'vllm:num_requests_running')"; wait_="$(metric 'vllm:num_requests_waiting')"
@@ -395,7 +399,18 @@ cmd_status() {
     fi
   fi
 
-  local tps; tps="$(metric 'vllm:avg_generation_throughput_toks_per_s')"
+  # Decode rate. 0.25 exposes only a cumulative token counter (the 0.21-era
+  # avg_generation_throughput gauge is gone), so sample it twice and divide.
+  # Idle fleets have no rate to report — that is a dash, not a fault.
+  local tps t0 t1
+  t0="$(metric 'vllm:generation_tokens_total')"
+  if [ -n "$t0" ]; then
+    sleep 2
+    t1="$(printf '%s' "$(curl -fsS --max-time 5 "$base/metrics" 2>/dev/null || true)"           | awk -v k='vllm:generation_tokens_total' '
+              index($0, k) == 1 && (substr($0, length(k)+1, 1) ~ /[{ ]/) { v = $NF }
+              END { if (v != "") print v }')"
+    tps="$(awk -v a="$t0" -v b="$t1" 'BEGIN{ d=(b-a)/2; if (d > 0.05) print d }')"
+  fi
   if [ -n "$tps" ] || [ -n "$alpha" ]; then
     printf '  %-12s %s tok/s' "decode" "${tps:+$(fmt "$tps" 1)}${tps:-–}"
     [ -n "$alpha" ] && printf '     \033[36m← α %s\033[0m' "$(fmt "$alpha")"
