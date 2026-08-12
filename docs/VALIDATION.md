@@ -64,6 +64,25 @@ almost linearly (~`20 + 65·α` tok/s on 0.21): free prose ≈ 0.33 → ~38 tok/
 code ≈ 0.56 → ~56 tok/s, repetitive text ≈ 0.74+ → 70+. Quote workload
 numbers, not peak numbers.
 
+## Long-context depth curve (2026-08-12)
+
+The published decode numbers were all ≤131K. Benchmarking deeper exposed a
+kernel-dispatch bug: `nvfp4_ds_mla` KV was routed to the slow bf16 path
+(`use_fp8_cache` only matched the fp8 name), collapsing decode at depth.
+One-line overlay fix; quality gate byte-identical; raw JSON in
+`results/depth-{before,after}.json`.
+
+| context | before | after |
+|---|---|---|
+| 131,072 | 38.4 tok/s | 46.5 tok/s |
+| 262,144 | 2.65 tok/s | **72.5 tok/s (27x)** |
+
+The depth penalty is gone, not reduced — 262K decodes in the same band as
+short context. Real agent traffic here has a p99 prompt of ~238K tokens, so
+the deepest quarter-percent of sessions were running ~25x slower than
+necessary until this fix. Lesson recorded: benchmark at the workload's p99
+depth, not the benchmark suite's habitual depths.
+
 ## What was tested vs not
 
 Tested: dark-window smoke suite (above), full systemd reboot path (cold boot,

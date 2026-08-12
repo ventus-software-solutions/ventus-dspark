@@ -1,0 +1,76 @@
+{
+  "base_url": "http://127.0.0.1:8000/v1",
+  "cases": [
+    {
+      "acceptance": 0.4975369458128079,
+      "aggregate_decode_tok_s": 46.456084651583616,
+      "concurrency": 1,
+      "mean_stream_decode_tok_s": 46.456084651583616,
+      "median_prefill_tok_s": 1772.835022091517,
+      "median_ttft_s": 73.94935138709843,
+      "target_prompt_tokens": 131072,
+      "trials": [
+        {
+          "acceptance": 0.4975369458128079,
+          "aggregate_decode_tok_s": 46.456084651583616,
+          "mean_stream_decode_tok_s": 46.456084651583616,
+          "median_prefill_tok_s": 1772.835022091517,
+          "median_ttft_s": 73.94935138709843,
+          "requests": [
+            {
+              "decode_tok_s": 46.456084651583616,
+              "elapsed_s": 76.68329028203152,
+              "output_tokens": 128,
+              "prefill_tok_s": 1772.835022091517,
+              "prompt_tokens": 131100,
+              "t_first": 1027591.287447071,
+              "t_last": 1027594.021211678,
+              "ttft_s": 73.94935138709843
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "acceptance": 0.5934065934065934,
+      "aggregate_decode_tok_s": 72.48217699633295,
+      "concurrency": 1,
+      "mean_stream_decode_tok_s": 72.48217699633295,
+      "median_prefill_tok_s": 1609.24215898344,
+      "median_ttft_s": 162.91705914889462,
+      "target_prompt_tokens": 262144,
+      "trials": [
+        {
+          "acceptance": 0.5934065934065934,
+          "aggregate_decode_tok_s": 72.48217699633295,
+          "mean_stream_decode_tok_s": 72.48217699633295,
+          "median_prefill_tok_s": 1609.24215898344,
+          "median_ttft_s": 162.91705914889462,
+          "requests": [
+            {
+              "decode_tok_s": 72.48217699633295,
+              "elapsed_s": 164.669305802905,
+              "output_tokens": 128,
+              "prefill_tok_s": 1609.24215898344,
+              "prompt_tokens": 262173,
+              "t_first": 1027757.580488695,
+              "t_last": 1027759.332643573,
+              "ttft_s": 162.91705914889462
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "corpus": "synthetic",
+  "max_tokens": 128,
+  "model": "/models/v4-flash-0731",
+  "profile": "compat",
+  "settings": {
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "trials": 1,
+    "warmup": 0
+  },
+  "thinking": "off"
+}
