@@ -877,12 +877,7 @@ class FlashMLASparseImpl(SparseMLAAttentionImpl[FlashMLASparseMetadata]):
         assert self.topk_indices_buffer is not None
         topk_indices = self.topk_indices_buffer[:num_actual_toks]
 
-        # VENTUS backport (MiaAI-Lab recipe issue #22): nvfp4_ds_mla shares the
-        # 584-byte KV layout with fp8_ds_mla, but this dispatch only recognized
-        # the fp8 name and sent nvfp4 to the slow _forward_bf16_kv path. At deep
-        # context that is a collapse, not a tax — measured on this fleet:
-        # 262K-token decode 2.65 -> (fix) fast-path tok/s; short context
-        # unaffected. Upstream 0.27 has the equivalent routing.
+        # nvfp4 shares fp8's KV layout; without this it takes the slow bf16 path (MiaAI #22)
         use_fp8_cache = self.kv_cache_dtype in ("fp8_ds_mla", "nvfp4_ds_mla")
 
         if not use_fp8_cache:
