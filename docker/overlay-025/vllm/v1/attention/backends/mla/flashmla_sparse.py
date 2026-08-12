@@ -877,7 +877,7 @@ class FlashMLASparseImpl(SparseMLAAttentionImpl[FlashMLASparseMetadata]):
         assert self.topk_indices_buffer is not None
         topk_indices = self.topk_indices_buffer[:num_actual_toks]
 
-        # nvfp4 shares fp8's KV layout; without this it takes the slow bf16 path (MiaAI #22)
+        # nvfp4 shares fp8's KV layout; without this it takes the slow bf16 path
         use_fp8_cache = self.kv_cache_dtype in ("fp8_ds_mla", "nvfp4_ds_mla")
 
         if not use_fp8_cache:

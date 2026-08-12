@@ -8,7 +8,7 @@ FROM ghcr.io/anemll/dspark-vllm-gx10:0.1.1
 COPY overlay-025/vllm/entrypoints/anthropic/protocol.py \
   /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/anthropic/protocol.py
 
-# nvfp4_ds_mla KV kernel-dispatch fix (MiaAI #22); details in the commit.
+# nvfp4_ds_mla KV kernel-dispatch fix; details in the commit.
 COPY overlay-025/vllm/v1/attention/backends/mla/flashmla_sparse.py \
   /usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/flashmla_sparse.py
 
