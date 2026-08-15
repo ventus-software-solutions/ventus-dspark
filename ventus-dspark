@@ -52,6 +52,7 @@ MAX_NUM_BATCHED_TOKENS=8192
 MTP_NUM_TOKENS=""
 MAX_MODEL_LEN=""
 NCCL_IB_GID_INDEX=""
+WORKER_GID_INDEX=""
 NCCL_IB_HCA=""
 NCCL_SOCKET_IFNAME=""
 
@@ -101,29 +102,18 @@ fatal() { printf '\033[31m[ventus-dspark FATAL]\033[0m %s\n' "$*" >&2; exit 1; }
 run_worker() { ssh "${SSH_OPTS[@]}" "${WORKER_USER}@$WORKER" "$@"; }
 
 probe_ib() {
-  # Pick the IB device+port whose RoCEv2 GID is usable. A link-local (fe80)
-  # GID at the selected index or an all-zeros one means no RoCEv2 on that
-  # port. The working IPv4-mapped GID looks like
-  # 0000:0000:0000:0000:0000:ffff:c0a8:0102 — leading zeros are normal.
+  # Pick the IB device+port whose RoCEv2 GID is usable. The type comes from
+  # gid_attrs/types, not from the address shape: an IPv4-mapped GID looks
+  # identical for RoCE v1 and v2, so matching on the address alone silently
+  # selects v1 (measured 2026-08-15: index 2 was v1 on both nodes).
+  # Indices are not stable across reboots, so scan the whole table rather
+  # than a fixed 3/2/1 window -- the v2 entry sat at index 4 on one node.
+  local typ
   local host="$1" out dev port idx gid
   if [ "$host" = "local" ]; then
-    out="$(for d in /sys/class/infiniband/*/; do
-      dev="$(basename "$d")"
-      for p in "$d"ports/*/; do
-        port="$(basename "$p")"
-        for idx in 3 2 1; do
-          [ -r "$p"gids/$idx ] || continue
-          IFS= read -r gid < "$p"gids/$idx || true
-          case "$gid" in
-            ""|fe80:*) continue ;;
-            0000:0000:0000:0000:0000:0000:0000:0000) continue ;;
-            *) echo "$dev:$port:$idx" ;;
-          esac
-        done
-      done
-    done | head -1)"
+    out="$(for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 0 1 2 3 4 5 6 7; do [ -r "$p"gids/$idx ] || continue; IFS= read -r gid < "$p"gids/$idx || true; IFS= read -r typ < "$p"gid_attrs/types/$idx 2>/dev/null || typ=""; case "$typ" in *v2*) ;; *) continue ;; esac; case "$gid" in ""|fe80:*) continue ;; 0000:0000:0000:0000:0000:0000:0000:0000) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1)"
   else
-    out="$(run_worker 'for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 3 2 1; do [ -r "$p"gids/$idx ] || continue; IFS= read -r gid < "$p"gids/$idx || true; case "$gid" in ""|fe80:*) continue ;; 0000:0000:0000:0000:0000:0000:0000:0000) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1')"
+    out="$(run_worker 'for d in /sys/class/infiniband/*/; do dev=$(basename "$d"); for p in "$d"ports/*/; do port=$(basename "$p"); for idx in 0 1 2 3 4 5 6 7; do [ -r "$p"gids/$idx ] || continue; IFS= read -r gid < "$p"gids/$idx || true; IFS= read -r typ < "$p"gid_attrs/types/$idx 2>/dev/null || typ=""; case "$typ" in *v2*) ;; *) continue ;; esac; case "$gid" in ""|fe80:*) continue ;; 0000:0000:0000:0000:0000:0000:0000:0000) continue ;; *) echo "$dev:$port:$idx" ;; esac; done; done; done | head -1')"
   fi
   [ -n "$out" ] || fatal "no usable RoCEv2 GID found on $host — check the IB fabric"
   echo "$out"
@@ -246,8 +236,13 @@ cmd_up() {
   [ "${local_ib%%:*}" = "${worker_ib%%:*}" ] || fatal "head HCA ${local_ib%%:*} != worker HCA ${worker_ib%%:*} — check the fabric"
   NCCL_IB_HCA="${local_ib%%:*}"
   NCCL_IB_GID_INDEX="${local_ib##*:}"
+  # GID indices are per-node: the same RoCEv2 address sat at index 4 on one
+  # node and 3 on the other (2026-08-15). Pushing the head's index onto the
+  # worker would select a non-existent or wrong-type GID there, so the worker
+  # keeps its own -- overridden inline at `docker compose up`, like NODE_RANK.
+  WORKER_GID_INDEX="${worker_ib##*:}"
   NCCL_SOCKET_IFNAME="$(ip route get "$WORKER" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
-  log "IB: $NCCL_IB_HCA gid=$NCCL_IB_GID_INDEX eth=$NCCL_SOCKET_IFNAME"
+  log "IB: $NCCL_IB_HCA gid=$NCCL_IB_GID_INDEX (worker gid=$WORKER_GID_INDEX) eth=$NCCL_SOCKET_IFNAME"
 
   BLOCK_K="$(checkpoint_k)"
   # k=7 on the 025 lane: +8.8% single-stream over the checkpoint's block of 5,
@@ -292,7 +287,7 @@ cmd_up() {
   # reused — compose sees "same config, already running" and keeps a zombie
   # whose TCPStore is dead, and the new head waits on it forever (lived
   # 2026-08-04 during the first fleet-boot drill).
-  run_worker "cd ~/.ventus-dspark && NODE_RANK=1 HEADLESS=1 VLLM_HOST_IP=$WORKER docker compose --env-file env.dspark -f ventus-dspark.yml up -d --force-recreate"
+  run_worker "cd ~/.ventus-dspark && NODE_RANK=1 HEADLESS=1 VLLM_HOST_IP=$WORKER NCCL_IB_GID_INDEX=$WORKER_GID_INDEX docker compose --env-file env.dspark -f ventus-dspark.yml up -d --force-recreate"
 
   log "starting head rank..."
   cd "$SCRIPT_DIR"
