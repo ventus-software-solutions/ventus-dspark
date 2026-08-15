@@ -11,6 +11,17 @@ services:
 
     gpus: all
 
+    restart: unless-stopped
+    # A wedged engine keeps the container running, so the probe is what catches it.
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request,os; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('VLLM_PORT','8888')+'/v1/models', timeout=10)"]
+      # Cold two-node load takes minutes; an impatient probe would restart-loop it.
+      start_period: 15m
+      interval: 60s
+      timeout: 15s
+      retries: 3
+
     devices:
       - /dev/infiniband:/dev/infiniband
 
