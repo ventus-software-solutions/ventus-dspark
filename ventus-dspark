@@ -90,6 +90,8 @@ usage() {
   echo "  --model <dir>     weights directory on BOTH nodes (default ~/models/v4-flash-0731)"
   echo "  --served-name <s> API model id clients send (default /models/<dir>);"
   echo "                    the fleet passes served_model_name from the model yaml"
+  echo "  --alias <s>       extra model id served alongside the real one, so"
+  echo "                    clients can pin one name across brain swaps"
   echo "  --port <n>        API port (default 8000)"
   echo "  --image <tag>     runtime image (default depends on --engine)"
   echo "  --thinking <lvl>  default reasoning effort: off|low|high|max (default off)"
@@ -160,7 +162,10 @@ HF_HUB_DISABLE_XET=1
 HF_CACHE=$HOME/.cache/huggingface
 MODELS_DIR=$(dirname "$MODEL")
 DSPARK_MODEL=/models/$(basename "$MODEL")
-SERVED_MODEL_NAME=${SERVED_NAME:-/models/$(basename "$MODEL")}
+# vLLM takes a LIST here: name[0] is what responses and metrics report (so
+# the specific brain stays visible), and every name is routable. The alias
+# is what clients pin so a brain swap does not break them.
+SERVED_MODEL_NAME="${SERVED_NAME:-/models/$(basename "$MODEL")}${SERVED_ALIAS:+ $SERVED_ALIAS}"
 VLLM_PORT=$VLLM_PORT
 VLLM_HOST=0.0.0.0
 API_URL=http://127.0.0.1:$VLLM_PORT/v1/models
@@ -643,6 +648,7 @@ while [ $# -gt 0 ]; do
     --worker) WORKER="$2"; shift ;;
     --model) MODEL="$2"; shift ;;
     --served-name) SERVED_NAME="$2"; shift ;;
+    --alias) SERVED_ALIAS="$2"; shift ;;
     --port) VLLM_PORT="$2"; shift ;;
     --dash-port) DASH_PORT="$2"; shift ;;
     --image) IMAGE="$2"; shift ;;
