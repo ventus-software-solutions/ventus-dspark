@@ -495,7 +495,7 @@ cmd_status() {
   # Decode rate from the same pair of samples. 0.25 exposes only a cumulative
   # token counter (the 0.21-era avg_generation_throughput gauge is gone).
   # An idle fleet has no rate to report — that is a dash, not a fault.
-  local tps t0 t1
+  local tps="" t0 t1
   t0="$(metric 'vllm:generation_tokens_total')"
   t1="$(metric2 'vllm:generation_tokens_total')"
   if [ -n "$t0" ] && [ -n "$t1" ]; then
