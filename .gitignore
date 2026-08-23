@@ -4,3 +4,6 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local out-of-core runtime builds
+outcore/build/
