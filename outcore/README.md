@@ -18,6 +18,22 @@ make inspect MODEL=/mnt/e/model-archive/deepseek-v4-flash
 
 The source checkpoint on `E:` remains read-only. Repacked hot bundles will live on `D:`.
 
+Repack one layer, then resume the complete model conversion:
+
+```sh
+make build/outcore-repack
+./build/outcore-repack \
+  --model /mnt/e/model-archive/deepseek-v4-flash \
+  --output /mnt/d/ventus-outcore-cache/deepseek-v4-flash-v1 \
+  --layer 0
+./build/outcore-repack \
+  --model /mnt/e/model-archive/deepseek-v4-flash \
+  --output /mnt/d/ventus-outcore-cache/deepseek-v4-flash-v1 \
+  --all
+```
+
+Completed segments are checksum-verified and atomically renamed. A resumed run skips them.
+
 Compile and run the CUDA baseline in the pinned development container:
 
 ```powershell
@@ -33,3 +49,11 @@ docker run --rm --gpus all `
 - Use CPU only for file I/O, scheduling, caching, and transfers.
 - Missing prefetches may stall but never change selected experts.
 - Establish correctness before throughput optimization.
+
+## Memory hierarchy
+
+- `D:` stores the complete expert-contiguous model.
+- RAM uses a byte-budgeted LRU, targeting 40–48 GiB only when host headroom permits.
+- Two small pinned buffers stage asynchronous GPU transfers.
+- VRAM stores packed experts; weight tiles are expanded only for computation.
+- Initial VRAM budget is 6 GiB, leaving WDDM and CUDA headroom.
