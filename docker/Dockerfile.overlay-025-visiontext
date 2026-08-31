@@ -1,0 +1,8 @@
+# TRIAL image: the production 025 lane + text-only loading of the Vision-Exp
+# checkpoint (vision tensors skipped; see skip_vision_tensors.py header).
+# Production tag 0731-025-0.1.0 is deliberately untouched.
+FROM ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-0.1.0
+
+COPY overlay-025-visiontext/skip_vision_tensors.py /opt/ventus/skip_vision_tensors.py
+RUN python3 /opt/ventus/skip_vision_tensors.py --apply \
+  && python3 -c "import vllm; print('vllm', vllm.__version__)"
