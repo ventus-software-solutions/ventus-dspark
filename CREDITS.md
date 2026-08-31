@@ -11,6 +11,9 @@ Please credit the upstream authors when reusing it.
 - **Roady001 + Fable** — DSpark cold-start garble root-cause fix (Patch 3).
 - **jasl** — SM12x enablement for DeepSeek V4 Flash in vLLM (PR #41834, unmerged upstream).
   https://github.com/vllm-project/vllm/pull/41834
+- **MiaAI-Lab** — native DeepSeek-V4-Flash-Vision-Exp support for the 025 lane
+  (vision_exp modules, vision + empty-encoder-output hotfixes; fetched @ 7963d432).
+  https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 - **MiaAI-Lab, Anemll, r0b0tlab, rafaelcaricio, bjk110** — the prebuilt runtime
   lineage this container builds on (base image
   `ghcr.io/bjk110/vllm-spark:unholy-fusion-prod-ready`).
