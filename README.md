@@ -190,17 +190,22 @@ docs/VALIDATION.md          measured numbers + methodology
 
 ## Engine lanes
 
-Two engine lanes, selected with `--engine` (or `VENTUS_ENGINE`):
+Three engine lanes, selected with `--engine` (or `VENTUS_ENGINE`):
 
 - **025** (default) — Anemll's GB10 port of vLLM 0.25.1, DSpark/NVFP4/b12x
   baked in, our `/v1/messages` thinking overlay on top. Measured +8.4% decode
   and +15% KV pool over 021 (see [docs/VALIDATION.md](docs/VALIDATION.md)).
   Build: `./scripts/build.sh 025`.
+- **025-vision** — the 025 lane plus MiaAI's native DeepSeek-V4-Flash-Vision-Exp
+  support (`docker/overlay-025-vision/`): image input via `image_url`, same
+  compose and memory margin. The checkpoint's chained MTP head (3 layers) makes
+  k a multiple of 3; `scripts/checkpoint_k.py` derives 6 and rejects anything
+  else before boot.
 - **021** — the original bjk110-based Stage-C chain, kept as the rollback
   lane. Build: `./scripts/build.sh`.
 
-The lanes are not mix-and-match: overlay files from one vLLM version crash
-the other, which is why each lane has its own compose file and image.
+021 and 025 are not mix-and-match: overlay files from one vLLM version crash
+the other, which is why each has its own compose file and image.
 
 ## Roadmap
 

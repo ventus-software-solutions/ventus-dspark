@@ -21,9 +21,10 @@ ENV_FILE="$ENV_DIR/env.dspark"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
 # Engine lane: 025 (default, Anemll vLLM 0.25 port — +8% decode, +15% KV
-# pool vs 021, see docs/VALIDATION.md) or 021 (bjk110 base, kept for
-# rollback). Each lane has its own compose file and image; they are not
-# mix-and-match — overlay files from one vLLM version crash the other.
+# pool vs 021, see docs/VALIDATION.md), 025-vision (025 + MiaAI's native
+# DeepSeek-V4-Flash-Vision-Exp support, docker/overlay-025-vision) or 021
+# (bjk110 base, kept for rollback). Each lane has its own image; 021 and 025
+# are not mix-and-match — overlay files from one vLLM version crash the other.
 ENGINE="${VENTUS_ENGINE:-025}"
 IMAGE="${VENTUS_IMAGE:-}"
 VLLM_PORT=8000
@@ -72,7 +73,15 @@ resolve_engine() {
       # margin lesson VALIDATION.md already recorded for the 021 lane.
       [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.78
       ;;
-    *) fatal "--engine must be 021 or 025 (got '$ENGINE')" ;;
+    025-vision)
+      # The 025 engine plus native image input for Vision-Exp; same compose
+      # and memory margin, only the image differs. The checkpoint's chained
+      # MTP head (nextn=3) is handled by scripts/checkpoint_k.py.
+      COMPOSE="$SCRIPT_DIR/compose/ventus-dspark-025.yml"
+      [ -n "$IMAGE" ] || IMAGE="ghcr.io/ventus-software-solutions/dspark-vllm:0731-025-vision-0.1.0"
+      [ -n "$GPU_MEMORY_UTILIZATION" ] || GPU_MEMORY_UTILIZATION=0.78
+      ;;
+    *) fatal "--engine must be 021, 025 or 025-vision (got '$ENGINE')" ;;
   esac
 }
 
@@ -121,16 +130,6 @@ probe_ib() {
   fi
   [ -n "$out" ] || fatal "no usable RoCEv2 GID found on $host — check the IB fabric"
   echo "$out"
-}
-
-checkpoint_k() {
-  # dspark_block_size from the checkpoint config; the model card's
-  # num_speculative_tokens (7) is NOT the drafter geometry.
-  python3 - "$MODEL/config.json" <<'PY'
-import json, sys
-cfg = json.load(open(sys.argv[1]))
-print(cfg.get("dspark_block_size", 5))
-PY
 }
 
 checkpoint_ctx() {
@@ -251,25 +250,13 @@ cmd_up() {
   NCCL_SOCKET_IFNAME="$(ip route get "$WORKER" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
   log "IB: $NCCL_IB_HCA gid=$NCCL_IB_GID_INDEX (worker gid=$WORKER_GID_INDEX) eth=$NCCL_SOCKET_IFNAME"
 
-  BLOCK_K="$(checkpoint_k)"
-  # k=7 on the 025 lane: +8.8% single-stream over the checkpoint's block of 5,
-  # measured 2026-08-06 with byte-identical greedy output (docs/EXPERIMENTS.md).
-  # The 021 lane crashes above 5, so it keeps the checkpoint value.
-  if [ "$ENGINE" = "025" ] && [ "$BLOCK_K" = "5" ]; then
-    MTP_NUM_TOKENS="${VENTUS_K:-7}"
-  else
-    MTP_NUM_TOKENS="${VENTUS_K:-$BLOCK_K}"
-  fi
+  # Drafter geometry (block, chained-MTP depth, k) and every k rule live in
+  # scripts/checkpoint_k.py so a bad VENTUS_K fails here, not at engine boot.
+  local geo
+  geo=$(python3 "$SCRIPT_DIR/scripts/checkpoint_k.py" "$MODEL/config.json" "$ENGINE" ${VENTUS_K:+"$VENTUS_K"} 2>&1)     || fatal "$geo"
+  read -r BLOCK_K NEXTN MTP_NUM_TOKENS <<< "$geo"
   MAX_MODEL_LEN="$(checkpoint_ctx)"
-  log "dspark block=$BLOCK_K k=$MTP_NUM_TOKENS context=$MAX_MODEL_LEN"
-  if [ "$ENGINE" = "021" ]; then
-    # The 0.21 engine crashes on k>5 ("size of tensor a (7) must match b (5)").
-    [ "$MTP_NUM_TOKENS" -le 5 ] || fatal "k=$MTP_NUM_TOKENS unsupported on the 021 lane (crashes >5)"
-  else
-    # 0.25+: any k >= block is legal — the drafter extends its block in the
-    # same parallel pass. k < block is rejected by the engine itself.
-    [ "$MTP_NUM_TOKENS" -ge "$BLOCK_K" ] || fatal "k=$MTP_NUM_TOKENS < drafter block $BLOCK_K"
-  fi
+  log "dspark block=$BLOCK_K nextn=$NEXTN k=$MTP_NUM_TOKENS context=$MAX_MODEL_LEN"
 
   # Also catches a bad VENTUS_THINKING from the environment, not just --thinking.
   case "$DEFAULT_THINKING" in
