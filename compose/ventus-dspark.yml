@@ -14,8 +14,12 @@ services:
     restart: unless-stopped
     # A wedged engine keeps the container running, so the probe is what catches it.
     healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import urllib.request,os; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('VLLM_PORT','8888')+'/v1/models', timeout=10)"]
+      # The port is interpolated HERE, at compose time: the container env carries
+      # no VLLM_PORT, so reading it inside the probe fell back to :8888 and marked
+      # a serving head "unhealthy" (2026-09-02). A headless rank (the worker,
+      # HEADLESS=1) has no API at all: it passes by construction — alive is all
+      # there is to check.
+      test: ["CMD-SHELL", "${HEADLESS:+exit 0;} python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${VLLM_PORT:-8888}/v1/models', timeout=10)\""]
       # Cold two-node load takes minutes; an impatient probe would restart-loop it.
       start_period: 15m
       interval: 60s
