@@ -1,18 +1,32 @@
 # ventus-dspark
 
-**One command to serve DeepSeek-V4-Flash-0731 on two NVIDIA DGX Spark (GB10)
-machines — 1M context, DSpark speculative decoding, OpenAI + Anthropic
-compatible APIs. No .env editing, no kernel patches, no build on your side.**
+**One command to serve supported DeepSeek-V4-Flash checkpoints on two NVIDIA
+DGX Spark (GB10) machines — 1M context, DSpark speculative decoding, OpenAI +
+Anthropic APIs.** The default `025` lane serves 0731; `025-vision` serves
+DeepSeek-V4-Flash-Vision-Exp with image input.
+
+This repository owns the runtime. For the managed Ventus fleet, use
+[`gx10-fleet`](https://github.com/ventus-software-solutions/gx10-fleet) to
+stage weights and start the service; it invokes this launcher with the model's
+declared engine lane.
+
+## Standalone quickstart
 
 ```bash
-# on both nodes: get the image (or build it — see below)
-docker pull ghcr.io/ventus-software-solutions/dspark-vllm:0731-0.1.0
+git clone https://github.com/ventus-software-solutions/ventus-dspark ~/ventus-dspark-025
+cd ~/ventus-dspark-025
 
-# on the head node:
+# DeepSeek-V4-Flash-0731 (default 025 lane), on the head:
 ./ventus-dspark up --worker 192.168.1.2 --model ~/models/v4-flash-0731
+
+# DeepSeek-V4-Flash-Vision-Exp:
+./ventus-dspark up --engine 025-vision --worker 192.168.1.2 \
+  --model ~/models/v4-flash-vision-exp \
+  --served-name /models/v4-flash-vision-exp
 ```
 
-That's it. The launcher probes the IB fabric, validates the drafter geometry
+The model directory must exist on both nodes. The launcher pulls the selected
+image if needed, probes the IB fabric, validates the drafter geometry
 against the checkpoint, generates the full validated profile, starts the
 worker first, waits for health, and prints your endpoint:
 
@@ -27,8 +41,22 @@ worker first, waits for health, and prints your endpoint:
 - 2× DGX Spark (GB10, SM121), 128 GB unified memory each, joined by a
   ConnectX/InfiniBand link (RoCE v2) — the 156 GB checkpoint cannot run on one.
 - Docker with compose v2 on both nodes, ssh from head to worker.
-- The 0731 weights on **both** nodes (download once, copy over):
-  `~/models/v4-flash-0731` (155 GB, `deepseek-ai/DeepSeek-V4-Flash-0731`).
+- Python 3 and the Hugging Face `hf` CLI when using `fetch-weights.sh`.
+- A supported checkpoint on **both** nodes. Download once and copy over the
+  fabric. The default example is `~/models/v4-flash-0731` (155 GB,
+  `deepseek-ai/DeepSeek-V4-Flash-0731`).
+
+For Vision-Exp, fetch the pinned checkpoint on the head, then copy it:
+
+```bash
+./scripts/fetch-weights.sh \
+  --repo deepseek-ai/DeepSeek-V4-Flash-Vision-Exp \
+  --revision 86f746b36186f0e567729a5c06a8c918caba82a9 \
+  --dir ~/models/v4-flash-vision-exp \
+  --expected-bytes 167819616863
+rsync -a --partial --info=progress2 ~/models/v4-flash-vision-exp/ \
+  192.168.1.2:~/models/v4-flash-vision-exp/
+```
 
 ## What it does for you
 
@@ -47,7 +75,7 @@ worker first, waits for health, and prints your endpoint:
 - **Both APIs.** OpenAI-compatible (`/v1/chat/completions`, AIDE/Codex) and
   Anthropic-compatible (`/v1/messages`, Claude Code), tool calling and
   reasoning content included.
-- **Reasoning that actually arrives.** 0731 ships no Jinja chat template —
+- **Reasoning that actually arrives.** These checkpoints ship no Jinja chat template —
   reasoning is driven by the checkpoint's own encoder via
   `chat_template_kwargs`. Anthropic clients send a `thinking` block instead,
   so the overlay translates it; without that, Claude Code asks for extended
@@ -161,26 +189,28 @@ only on probes that proved self-stable at baseline — one prose prompt sits
 on a floating-point near-tie and returns three different answers to
 identical requests at any config, so it is reported rather than failed.
 
-## Building the image yourself
+## Building the images yourself
 
 No compiled code of our own — the image is a pinned public base plus a pure
 Python overlay, so you can build (and audit) every layer:
 
 ```bash
-./scripts/build.sh          # on each node, or ARM64 CI
+./scripts/build.sh 025          # default 0731 lane
+./scripts/build.sh 025-vision   # Vision-Exp lane
+./scripts/build.sh 021          # legacy rollback lane
 ```
 
-Pins: base `ghcr.io/bjk110/vllm-spark:unholy-fusion-prod-ready`, engine
-vLLM `0.21.1rc1.dev339`, overlay + Patch 4 vendored under `docker/` (MIT,
-see [CREDITS.md](CREDITS.md)). The final image verifies itself with
-`import vllm` before reporting success.
+Each lane pins its own public base and verifies `import vllm` before reporting
+success. The 025 lane uses the Anemll GB10 image; 025-vision layers the vendored
+Vision-Exp patch set on it; 021 uses the bjk110 base. See
+[CREDITS.md](CREDITS.md).
 
 ## Layout
 
 ```
 ventus-dspark               the one command (up/down, --dry-run)
 compose/ventus-dspark.yml   compose service (worker/head roles)
-scripts/build.sh            reproducible image build
+scripts/build.sh            reproducible image builds for all engine lanes
 scripts/benchmark.py        prefill/decode/acceptance sweep (stdlib only)
 scripts/quality-probe.py    output-equivalence gate for config changes
 docker/                     vendored overlay + stage Dockerfiles (MIT)
@@ -200,9 +230,9 @@ Three engine lanes, selected with `--engine` (or `VENTUS_ENGINE`):
   support (`docker/overlay-025-vision/`): image input via `image_url`, same
   compose and memory margin. The checkpoint's chained MTP head (3 layers) makes
   k a multiple of 3; `scripts/checkpoint_k.py` derives 6 and rejects anything
-  else before boot.
+  else before boot. Build: `./scripts/build.sh 025-vision`.
 - **021** — the original bjk110-based Stage-C chain, kept as the rollback
-  lane. Build: `./scripts/build.sh`.
+  lane. Build: `./scripts/build.sh 021`.
 
 021 and 025 are not mix-and-match: overlay files from one vLLM version crash
 the other, which is why each has its own compose file and image.
